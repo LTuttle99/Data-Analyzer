@@ -1215,52 +1215,164 @@ class BookOfBusinessAnalyzer:
         self, working_df, time_col, metric_col, entity_col, target_series, dimension_col, avg_monthly_scope_total
     ) -> list:
         """
-        Flag values within a dimension column whose most recent month deviates sharply from
-        their own trailing 3-month average — a spike or drop worth a human look, distinct
-        from the static "largest entities" concentration check elsewhere.
+        Flag values within a dimension column whose most recent month is a statistical
+        outlier relative to that value's own history — a spike or drop worth a human look,
+        distinct from the static "largest entities" concentration check elsewhere.
 
-        `avg_monthly_scope_total` is the whole dataset's average monthly volume, used to
-        filter out entities too small to be worth flagging (compared like-for-like against
-        a typical month, not the multi-year cumulative total).
+        Uses a z-score against each value's own trailing mean/std (not a fixed % threshold),
+        so a naturally volatile series doesn't flood with false positives while a stable one
+        still catches a real, smaller move. `avg_monthly_scope_total` is the whole dataset's
+        average monthly volume, used to filter out values too small to be worth flagging.
+
+        Vectorized as a single groupby across all values in the dimension column rather than
+        one groupby per distinct value — the latter scales badly (one full aggregation per
+        unique value) and was the main slow point on larger files.
         """
         flags = []
 
         if not dimension_col or dimension_col not in working_df.columns:
             return flags
 
-        for value in working_df[dimension_col].dropna().unique():
-            entity_df = working_df[working_df[dimension_col] == value]
-            monthly = self._build_monthly_series(entity_df, time_col, metric_col, entity_col, target_series)
+        d = working_df.dropna(subset=[dimension_col])
 
-            if len(monthly) < 4:
+        if d.empty:
+            return flags
+
+        d = d.copy()
+        d["YearMonth"] = d[time_col].dt.to_period("M")
+
+        if target_series == "value":
+            grouped = d.groupby([dimension_col, "YearMonth"])[metric_col].sum().reset_index(name="metric_value")
+        elif entity_col and entity_col in d.columns:
+            grouped = d.groupby([dimension_col, "YearMonth"])[entity_col].nunique().reset_index(name="metric_value")
+        else:
+            grouped = d.groupby([dimension_col, "YearMonth"]).size().reset_index(name="metric_value")
+
+        for value, sub in grouped.groupby(dimension_col):
+            sub = sub.sort_values("YearMonth")
+
+            if len(sub) < 4:
                 continue
 
-            monthly = monthly.sort_values("YearMonth").reset_index(drop=True)
-            latest_value = float(monthly[target_series].iloc[-1])
-            trailing_window = monthly[target_series].iloc[-4:-1]
-            baseline = float(trailing_window.mean()) if len(trailing_window) > 0 else 0.0
+            history = sub["metric_value"].iloc[:-1]
+            latest_value = float(sub["metric_value"].iloc[-1])
 
-            if baseline <= 0:
+            mean_val = float(history.mean())
+            std_val = float(history.std(ddof=0))
+
+            if mean_val <= 0:
                 continue
 
-            # Ignore entities too small to matter relative to the dataset's typical month.
-            if avg_monthly_scope_total > 0 and (baseline / avg_monthly_scope_total) < 0.03:
+            # Ignore values too small to matter relative to the dataset's typical month.
+            if avg_monthly_scope_total > 0 and (mean_val / avg_monthly_scope_total) < 0.03:
                 continue
 
-            deviation = (latest_value - baseline) / baseline
+            deviation_pct = (latest_value - mean_val) / mean_val * 100
 
-            if abs(deviation) >= 0.4:
+            if std_val > 0:
+                z_score = (latest_value - mean_val) / std_val
+            else:
+                # No variance in history at all — any move is either "identical" or "brand new
+                # behavior"; treat a real change as maximally significant, no change as none.
+                z_score = 0.0 if abs(deviation_pct) < 1 else (10.0 if deviation_pct > 0 else -10.0)
+
+            # Require both statistical significance (z-score) and a economically meaningful
+            # move (% floor) — a tiny std can otherwise make trivial moves look significant.
+            if abs(z_score) >= 2.0 and abs(deviation_pct) >= 15:
                 flags.append({
                     "dimension_column": dimension_col,
                     "scope_value": str(value),
-                    "latest_period": str(monthly["YearMonth"].iloc[-1]),
+                    "latest_period": str(sub["YearMonth"].iloc[-1]),
                     "latest_value": latest_value,
-                    "trailing_avg": baseline,
-                    "deviation_pct": float(deviation * 100),
-                    "direction": "spike" if deviation > 0 else "drop"
+                    "trailing_avg": mean_val,
+                    "deviation_pct": float(deviation_pct),
+                    "z_score": float(z_score),
+                    "direction": "spike" if deviation_pct > 0 else "drop"
                 })
 
         return flags
+
+    def compute_dimension_drivers(
+        self, working_df, time_col, metric_col, entity_col, target_series, dimension_col, top_n: int = 8
+    ) -> dict:
+        """
+        Decompose the change between the two most recent complete months into contributions
+        from each value of `dimension_col` — "what's actually driving the move", not just
+        "what's biggest". A value can be the largest slice of the total and still contribute
+        nothing to why the number moved this month.
+        """
+        empty_result = {
+            "dimension_column": dimension_col,
+            "prior_period": None,
+            "current_period": None,
+            "total_change": 0.0,
+            "drivers": []
+        }
+
+        if not dimension_col or dimension_col not in working_df.columns:
+            return empty_result
+
+        d = working_df.dropna(subset=[dimension_col])
+
+        if d.empty:
+            return empty_result
+
+        d = d.copy()
+        d["YearMonth"] = d[time_col].dt.to_period("M")
+
+        available_months = sorted(d["YearMonth"].unique())
+
+        if len(available_months) < 2:
+            return empty_result
+
+        current_month = available_months[-1]
+        prior_month = available_months[-2]
+
+        if target_series == "value":
+            grouped = d.groupby([dimension_col, "YearMonth"])[metric_col].sum()
+        elif entity_col and entity_col in d.columns:
+            grouped = d.groupby([dimension_col, "YearMonth"])[entity_col].nunique()
+        else:
+            grouped = d.groupby([dimension_col, "YearMonth"]).size()
+
+        grouped = grouped.unstack(fill_value=0)
+
+        if current_month not in grouped.columns or prior_month not in grouped.columns:
+            return empty_result
+
+        current_vals = grouped[current_month]
+        prior_vals = grouped[prior_month]
+
+        total_change = float(current_vals.sum() - prior_vals.sum())
+
+        drivers = []
+
+        for value in grouped.index:
+            prior_v = float(prior_vals.get(value, 0))
+            current_v = float(current_vals.get(value, 0))
+            change = current_v - prior_v
+
+            if abs(change) < 1e-9:
+                continue
+
+            drivers.append({
+                "value": str(value),
+                "prior_value": prior_v,
+                "current_value": current_v,
+                "change": float(change),
+                "pct_of_total_change": float(change / total_change * 100) if total_change != 0 else 0.0,
+                "direction": "up" if change > 0 else "down"
+            })
+
+        drivers = sorted(drivers, key=lambda item: abs(item["change"]), reverse=True)[:top_n]
+
+        return {
+            "dimension_column": dimension_col,
+            "prior_period": str(prior_month),
+            "current_period": str(current_month),
+            "total_change": total_change,
+            "drivers": drivers
+        }
 
     # ----------------------------------------------------------------------- #
     # AI insights
@@ -1893,6 +2005,10 @@ class BookOfBusinessAnalyzer:
                 "ai_insights": self._empty_ai_insights(),
                 "anomalies": [],
                 "trend_anomalies": [],
+                "dimension_drivers": {
+                    "dimension_column": None, "prior_period": None, "current_period": None,
+                    "total_change": 0.0, "drivers": []
+                },
                 "goal_progress": empty_goal_progress,
                 "entity_split": entity_split,
                 "diagnostics": {
@@ -2063,6 +2179,12 @@ class BookOfBusinessAnalyzer:
 
         trend_anomalies = sorted(trend_anomalies, key=lambda a: abs(a["deviation_pct"]), reverse=True)[:10]
 
+        dimension_drivers = self.compute_dimension_drivers(
+            working_df, time_col, metric_col, entity_col, target_series, primary_dimension
+        ) if primary_dimension else {
+            "dimension_column": None, "prior_period": None, "current_period": None, "total_change": 0.0, "drivers": []
+        }
+
         ai_insights = self._generate_ai_insights(
             total_metric_value=total_metric_value,
             unique_entity_count=unique_entity_count,
@@ -2104,6 +2226,7 @@ class BookOfBusinessAnalyzer:
             "ai_insights": ai_insights,
             "anomalies": anomalies,
             "trend_anomalies": trend_anomalies,
+            "dimension_drivers": dimension_drivers,
             "long_range_forecast": long_range_forecast,
             "goal_progress": goal_progress,
             "entity_split": entity_split,
