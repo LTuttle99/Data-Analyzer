@@ -28,7 +28,8 @@
     <div id="loading-overlay" class="hidden fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center no-print">
         <div class="flex flex-col items-center gap-3">
             <div class="h-10 w-10 border-4 border-teal-500 border-t-transparent rounded-full animate-spin"></div>
-            <p class="text-sm text-slate-300">Running analysis...</p>
+            <p id="loading-status-message" class="text-sm text-slate-300">Running analysis...</p>
+            <p id="loading-elapsed-time" class="text-xs text-slate-500"></p>
         </div>
     </div>
 
@@ -460,6 +461,30 @@
                 </div>
             </section>
 
+            <section id="ask-question-card" class="bg-slate-950 border border-slate-800 rounded-xl p-6">
+                <h4 class="text-sm font-medium tracking-wide text-slate-300 mb-1">Ask a Question</h4>
+                <p class="text-xs text-slate-500 mb-4">
+                    Answered directly from this dashboard's own numbers — no external service, so it recognizes
+                    specific question patterns rather than free-form language. Try: "which [dimension] had the
+                    highest value", "what's driving the change", "is [goal] on track", "any anomalies", "repeat rate",
+                    or mention a value by name (e.g. "North").
+                </p>
+
+                <div class="flex gap-2">
+                    <input type="text" id="ask-question-input" placeholder="Ask a question about this data..."
+                        onkeydown="if (event.key === 'Enter') askQuestion();"
+                        class="flex-1 bg-slate-900 border border-slate-700 rounded-lg text-sm p-2.5 text-slate-100 focus:border-teal-500">
+                    <button onclick="askQuestion()" id="ask-question-btn" class="bg-teal-500 hover:bg-teal-400 text-slate-950 text-sm font-semibold px-5 py-2.5 rounded-lg transition-colors">
+                        Ask
+                    </button>
+                </div>
+
+                <div id="ask-question-answer-container" class="hidden mt-4 bg-slate-900/60 border border-slate-800 rounded-lg p-4">
+                    <p class="text-xs font-semibold uppercase tracking-wider text-teal-400 mb-2">Answer</p>
+                    <p id="ask-question-answer-text" class="text-sm text-slate-200 leading-relaxed whitespace-pre-wrap"></p>
+                </div>
+            </section>
+
             <section id="entity-split-card" class="bg-slate-950 border border-slate-800 rounded-xl p-6 transition-opacity">
                 <div class="flex items-center justify-between mb-4">
                     <h4 class="text-sm font-medium tracking-wide text-slate-300">New vs Repeat Entity Split</h4>
@@ -520,13 +545,29 @@
                 </div>
 
                 <div class="bg-slate-950 border border-slate-800 p-6 rounded-xl">
-                    <h4 class="text-sm font-medium tracking-wide text-slate-300 mb-4" id="title-segment">
-                        Segment Performance Share
-                    </h4>
+                    <div class="flex items-center justify-between mb-1">
+                        <h4 class="text-sm font-medium tracking-wide text-slate-300" id="title-segment">
+                            Segment Performance Share
+                        </h4>
+                        <button onclick="clearDrilldownFilter()" id="clear-drilldown-btn" class="hidden text-[10px] text-teal-400 hover:text-teal-300 font-medium">
+                            Clear drill-down
+                        </button>
+                    </div>
+                    <p class="text-[10px] text-slate-500 mb-3">Click a bar to filter to that value.</p>
 
                     <div class="h-72">
                         <canvas id="segmentChart"></canvas>
                     </div>
+                </div>
+
+                <div class="bg-slate-950 border border-slate-800 p-6 rounded-xl">
+                    <h4 class="text-sm font-medium tracking-wide text-slate-300 mb-4">
+                        Dimension Drivers of Change
+                    </h4>
+                    <p class="text-[10px] text-slate-500 -mt-3 mb-3" id="drivers-period-label">
+                        Comparing the two most recent complete months
+                    </p>
+                    <div id="dimension-drivers-list" class="space-y-2 max-h-72 overflow-y-auto pr-1"></div>
                 </div>
 
                 <div class="bg-slate-950 border border-slate-800 p-6 rounded-xl">
@@ -568,6 +609,26 @@
                     <p class="text-xs text-slate-500 mb-4">
                         Projected forward from the latest data point, not tied to calendar year-end. The shaded range widens the further out the estimate reaches — treat anything beyond ~12 months as directional planning, not a firm number.
                     </p>
+
+                    <div class="bg-slate-900/60 border border-slate-800 rounded-lg p-3 mb-4">
+                        <div class="flex items-center justify-between mb-2">
+                            <label class="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
+                                What-If: Adjust Annual Growth
+                            </label>
+                            <span id="scenario-adjustment-label" class="text-xs font-semibold text-purple-300">+0% / yr</span>
+                        </div>
+
+                        <input type="range" id="scenario-growth-slider" min="-30" max="30" step="1" value="0"
+                            oninput="onScenarioSliderChange()" class="w-full accent-purple-500">
+
+                        <div class="flex justify-between text-[10px] text-slate-600 mt-1">
+                            <span>-30%</span>
+                            <span>No adjustment (model's own trend)</span>
+                            <span>+30%</span>
+                        </div>
+
+                        <button onclick="resetScenarioSlider()" class="text-[10px] text-slate-500 hover:text-slate-300 mt-2">Reset to model trend</button>
+                    </div>
 
                     <div class="h-72">
                         <canvas id="longRangeForecastChart"></canvas>
@@ -793,8 +854,58 @@
                 if (select) Array.from(select.options).forEach(o => { o.selected = false; });
             });
 
+            const clearBtn = document.getElementById('clear-drilldown-btn');
+            if (clearBtn) clearBtn.classList.add('hidden');
+
             updateDimensionFiltersSummaryLabel();
             triggerUpdate();
+        }
+
+        function clearDrilldownFilter() {
+            if (currentPrimaryDimension && dimensionFilters[currentPrimaryDimension]) {
+                delete dimensionFilters[currentPrimaryDimension];
+            }
+
+            document.getElementById('clear-drilldown-btn').classList.add('hidden');
+            renderDimensionFilterControls();
+            updateDimensionFiltersSummaryLabel();
+            triggerUpdate();
+        }
+
+        function renderDimensionDrivers(drivers) {
+            const container = document.getElementById('dimension-drivers-list');
+            const periodLabel = document.getElementById('drivers-period-label');
+
+            if (!drivers || !drivers.dimension_column || !drivers.drivers || drivers.drivers.length === 0) {
+                container.innerHTML = '<p class="text-xs text-slate-500 italic">Not enough month-over-month history yet to identify drivers of change.</p>';
+                periodLabel.innerText = 'Comparing the two most recent complete months';
+                return;
+            }
+
+            periodLabel.innerText = `${escapeHtml(drivers.dimension_column)}: ${escapeHtml(drivers.prior_period)} → ${escapeHtml(drivers.current_period)}`;
+
+            const metric = currentMetricTarget;
+            const maxAbsChange = Math.max(...drivers.drivers.map(d => Math.abs(d.change)), 1);
+
+            container.innerHTML = drivers.drivers.map(d => {
+                const isUp = d.direction === 'up';
+                const barWidthPct = Math.min(100, Math.abs(d.change) / maxAbsChange * 100);
+                const barColor = isUp ? 'bg-emerald-500' : 'bg-red-500';
+                const textColor = isUp ? 'text-emerald-400' : 'text-red-400';
+                const sign = isUp ? '+' : '';
+
+                return `
+                    <div>
+                        <div class="flex items-center justify-between text-xs mb-1">
+                            <span class="text-slate-300 font-medium">${escapeHtml(d.value)}</span>
+                            <span class="${textColor} font-semibold">${sign}${formatValueByMetric(d.change, metric)} (${sign}${d.pct_of_total_change.toFixed(0)}% of total move)</span>
+                        </div>
+                        <div class="w-full bg-slate-900 rounded-full h-1.5">
+                            <div class="${barColor} h-1.5 rounded-full" style="width: ${barWidthPct}%"></div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
         }
 
         function updateDimensionFiltersSummaryLabel() {
@@ -1541,9 +1652,59 @@
             }
         }
 
+        let loadingIntervalHandle = null;
+        let loadingStartTime = null;
+
+        const LOADING_STAGE_MESSAGES = [
+            "Parsing file structure...",
+            "Applying filters and scope...",
+            "Computing KPIs and concentration metrics...",
+            "Fitting seasonal trend forecast...",
+            "Evaluating goal pacing...",
+            "Scanning for anomalies across dimensions...",
+            "Generating insights...",
+            "Almost there — large files can take a bit longer..."
+        ];
+
         function setLoadingState(isLoading) {
             const overlay = document.getElementById('loading-overlay');
-            if (overlay) overlay.classList.toggle('hidden', !isLoading);
+            const messageEl = document.getElementById('loading-status-message');
+            const elapsedEl = document.getElementById('loading-elapsed-time');
+
+            if (!overlay) return;
+
+            overlay.classList.toggle('hidden', !isLoading);
+
+            if (loadingIntervalHandle) {
+                clearInterval(loadingIntervalHandle);
+                loadingIntervalHandle = null;
+            }
+
+            if (!isLoading) {
+                if (elapsedEl) elapsedEl.innerText = '';
+                return;
+            }
+
+            loadingStartTime = Date.now();
+            let stageIndex = 0;
+
+            if (messageEl) messageEl.innerText = LOADING_STAGE_MESSAGES[0];
+            if (elapsedEl) elapsedEl.innerText = '0s elapsed';
+
+            loadingIntervalHandle = setInterval(() => {
+                const elapsedSeconds = Math.round((Date.now() - loadingStartTime) / 1000);
+
+                if (elapsedEl) elapsedEl.innerText = `${elapsedSeconds}s elapsed`;
+
+                // Advance roughly every couple seconds, but don't run past the last message —
+                // these are illustrative stages, not a real progress signal from the server.
+                const targetIndex = Math.min(LOADING_STAGE_MESSAGES.length - 1, Math.floor(elapsedSeconds / 2));
+
+                if (targetIndex !== stageIndex) {
+                    stageIndex = targetIndex;
+                    if (messageEl) messageEl.innerText = LOADING_STAGE_MESSAGES[stageIndex];
+                }
+            }, 500);
         }
 
         function showErrorToast(message) {
@@ -1723,6 +1884,7 @@
             renderTrendAnomalies(res.trend_anomalies);
             renderTrendChart(res.historical_timeline);
             renderDimensionChart(res.dimension_distribution, res.primary_dimension);
+            renderDimensionDrivers(res.dimension_drivers);
             renderProjectionChart(res.projections);
             renderSeasonalityChart(res.seasonality);
             renderLongRangeForecast(res.long_range_forecast);
@@ -1765,13 +1927,22 @@
             triggerUpdate();
         }
 
+        let lastLongRangeForecast = null;
+        let currentScenarioAdjustment = 0;
+
         function renderLongRangeForecast(lrf) {
+            lastLongRangeForecast = lrf;
+            renderLongRangeForecastWithScenario();
+        }
+
+        function renderLongRangeForecastWithScenario() {
+            const lrf = lastLongRangeForecast;
             const canvas = document.getElementById('longRangeForecastChart');
             if (!canvas) return;
 
-            const monthly = (lrf && lrf.monthly) || [];
+            const rawMonthly = (lrf && lrf.monthly) || [];
 
-            if (monthly.length === 0) {
+            if (rawMonthly.length === 0) {
                 initChartInstance('longRangeForecastChart', {
                     type: 'line',
                     data: { labels: [], datasets: [] },
@@ -1782,6 +1953,23 @@
                 `;
                 return;
             }
+
+            // Apply the what-if annual growth adjustment (compounded monthly) on top of the
+            // model's own trend/seasonal forecast — always recomputed from the original
+            // server response, never compounded on a previously-adjusted value.
+            const adjustmentPct = currentScenarioAdjustment;
+
+            const monthly = rawMonthly.map(m => {
+                const monthsAhead = m.months_ahead || 1;
+                const factor = Math.pow(1 + adjustmentPct / 100, monthsAhead / 12);
+
+                return {
+                    ...m,
+                    expected_value: m.expected_value * factor,
+                    conservative_value: m.conservative_value * factor,
+                    aggressive_value: m.aggressive_value * factor
+                };
+            });
 
             const labels = monthly.map(m => m.period);
 
@@ -1841,7 +2029,25 @@
                 }
             });
 
-            const rollup = (lrf && lrf.annual_rollup) || [];
+            const rollupMap = {};
+
+            monthly.forEach(m => {
+                const year = m.year;
+
+                if (!rollupMap[year]) {
+                    rollupMap[year] = { year, projected_total: 0, conservative_total: 0, aggressive_total: 0, months_included: 0 };
+                }
+
+                rollupMap[year].projected_total += m.expected_value;
+                rollupMap[year].conservative_total += m.conservative_value;
+                rollupMap[year].aggressive_total += m.aggressive_value;
+                rollupMap[year].months_included += 1;
+            });
+
+            const rollup = Object.values(rollupMap)
+                .sort((a, b) => a.year - b.year)
+                .map(y => ({ ...y, is_partial_year: y.months_included < 12 }));
+
             const rollupContainer = document.getElementById('annual-rollup-cards');
 
             if (rollup.length === 0) {
@@ -1856,6 +2062,35 @@
                     <p class="text-[10px] text-slate-500 mt-0.5">${formatValueByMetric(y.conservative_total, currentMetricTarget)} – ${formatValueByMetric(y.aggressive_total, currentMetricTarget)}</p>
                 </div>
             `).join('');
+        }
+
+        function onScenarioSliderChange() {
+            const slider = document.getElementById('scenario-growth-slider');
+            currentScenarioAdjustment = parseInt(slider.value, 10) || 0;
+
+            const label = document.getElementById('scenario-adjustment-label');
+            const sign = currentScenarioAdjustment >= 0 ? '+' : '';
+            label.innerText = `${sign}${currentScenarioAdjustment}% / yr`;
+            label.className = currentScenarioAdjustment === 0
+                ? "text-xs font-semibold text-purple-300"
+                : (currentScenarioAdjustment > 0 ? "text-xs font-semibold text-emerald-400" : "text-xs font-semibold text-red-400");
+
+            renderLongRangeForecastWithScenario();
+        }
+
+        function resetScenarioSlider() {
+            currentScenarioAdjustment = 0;
+
+            const slider = document.getElementById('scenario-growth-slider');
+            if (slider) slider.value = 0;
+
+            const label = document.getElementById('scenario-adjustment-label');
+            if (label) {
+                label.innerText = '+0% / yr';
+                label.className = "text-xs font-semibold text-purple-300";
+            }
+
+            renderLongRangeForecastWithScenario();
         }
 
         function renderForecastOutlook(fo) {
@@ -1923,6 +2158,136 @@
 
             document.getElementById('forecast-executive-summary').innerText =
                 fo.executive_summary || "Not enough data is available to produce a reliable year-end projection.";
+        }
+
+        function answerQuestionLocally(question) {
+            if (!lastResults) {
+                return "Run an analysis first so there's data to answer from.";
+            }
+
+            const q = question.toLowerCase().trim();
+            const metric = currentMetricTarget;
+            const kpis = lastResults.kpis || {};
+            const dimDist = lastResults.dimension_distribution || {};
+            const primaryDim = lastResults.primary_dimension;
+            const drivers = lastResults.dimension_drivers || {};
+            const forecast = lastResults.forecast_outlook || {};
+            const goals = lastResults.goal_progress || [];
+            const trendAnomalies = lastResults.trend_anomalies || [];
+
+            // Does the question mention a specific dimension value by name?
+            // (checked first/most specific — "North's revenue" shouldn't fall through
+            // to a generic "total" answer)
+            const dimEntries = Object.entries(dimDist);
+            let mentionedEntry = null;
+
+            for (const [key, val] of dimEntries) {
+                if (key && q.includes(key.toLowerCase())) {
+                    mentionedEntry = [key, val];
+                    break;
+                }
+            }
+
+            if (mentionedEntry) {
+                const [key, val] = mentionedEntry;
+                return `${key}: ${formatValueByMetric(val, metric)}${primaryDim ? ` (by ${primaryDim})` : ''}.`;
+            }
+
+            if (/\b(highest|largest|most|top|biggest)\b/.test(q) && dimEntries.length > 0) {
+                const sorted = [...dimEntries].sort((a, b) => b[1] - a[1]);
+                const [topKey, topVal] = sorted[0];
+                return `${topKey} has the highest value${primaryDim ? ` by ${primaryDim}` : ''}, at ${formatValueByMetric(topVal, metric)}.`;
+            }
+
+            if (/\b(lowest|smallest|least|bottom|worst)\b/.test(q) && dimEntries.length > 0) {
+                const sorted = [...dimEntries].sort((a, b) => a[1] - b[1]);
+                const [botKey, botVal] = sorted[0];
+                return `${botKey} has the lowest value${primaryDim ? ` by ${primaryDim}` : ''}, at ${formatValueByMetric(botVal, metric)}.`;
+            }
+
+            if (/\b(driv\w*|why|caus\w*|mov\w*)\b/.test(q)) {
+                if (drivers.drivers && drivers.drivers.length > 0) {
+                    const top = drivers.drivers[0];
+                    const dir = top.direction === 'up' ? 'increase' : 'decrease';
+                    return `From ${drivers.prior_period} to ${drivers.current_period}, the biggest driver of change was ` +
+                        `${top.value} (${drivers.dimension_column}), contributing ${formatValueByMetric(Math.abs(top.change), metric)} ` +
+                        `— about ${Math.abs(top.pct_of_total_change).toFixed(0)}% of the total ${dir}.`;
+                }
+                return "Not enough month-over-month history yet to identify drivers of change.";
+            }
+
+            if (/\b(forecast\w*|project\w*|year.?end|expect\w*)\b/.test(q)) {
+                if (forecast.projected_year_end) {
+                    const growth = Number(forecast.growth_vs_previous_year_pct || 0);
+                    return `The ${forecast.current_year} forecast projects ${formatValueByMetric(forecast.projected_year_end, metric)}, ` +
+                        `${growth >= 0 ? '+' : ''}${growth.toFixed(1)}% vs the prior year. Confidence: ${forecast.confidence_label || 'unavailable'}.`;
+                }
+                return "There isn't enough monthly history yet to produce a reliable forecast.";
+            }
+
+            if (/\b(grow\w*|trend\w*|increas\w*|decreas\w*|momentum)\b/.test(q)) {
+                const growth = Number(forecast.growth_vs_previous_year_pct || 0);
+                return `The current trend is ${(forecast.trend_direction || 'flat').toLowerCase()}, ` +
+                    `with ${growth >= 0 ? 'growth' : 'decline'} of ${Math.abs(growth).toFixed(1)}% projected vs the prior year.`;
+            }
+
+            if (/\b(goal\w*|on track|on pace|pacing|target\w*)\b/.test(q)) {
+                if (goals.length === 0) return "No goals are currently configured.";
+
+                return goals.map(g =>
+                    `${g.label} is ${g.status.replace('_', ' ')} (${Number(g.achievement_pct || 0).toFixed(0)}% of target)`
+                ).join('; ') + '.';
+            }
+
+            if (/\b(anomal\w*|spike\w*|drop\w*|unusual|outlier\w*)\b/.test(q)) {
+                if (trendAnomalies.length === 0) return "No significant spikes or drops were detected in the current selection.";
+
+                const first = trendAnomalies[0];
+                const more = trendAnomalies.length > 1 ? ` (${trendAnomalies.length - 1} more detected.)` : '';
+                return `${first.dimension_column}: ${first.scope_value} had a ${first.direction} of ` +
+                    `${Math.abs(first.deviation_pct).toFixed(0)}% in ${first.latest_period}.${more}`;
+            }
+
+            if (/\b(repeat\w*|retention|return\w*)\b/.test(q)) {
+                return `The repeat rate is ${Number(kpis.repeat_rate || 0).toFixed(1)}%.`;
+            }
+
+            if (/\b(concentrat\w*|hhi)\b/.test(q)) {
+                return `The HHI concentration index is ${Math.round(Number(kpis.hhi_index || 0)).toLocaleString()}.`;
+            }
+
+            if (/\b(average|avg|mean)\b/.test(q)) {
+                return `The average entity value is ${formatValueByMetric(kpis.avg_entity_value, metric)}.`;
+            }
+
+            if (/\b(how many|count\w*|number of)\b/.test(q)) {
+                return `There are ${Number(kpis.unique_entity_count || 0).toLocaleString()} unique entities in the current selection.`;
+            }
+
+            if (/\b(total\w*|sum|overall)\b/.test(q)) {
+                return `The total is ${formatValueByMetric(kpis.total_metric_value, metric)}.`;
+            }
+
+            return "I couldn't match that to a known question type. This answers from patterns, not free-form " +
+                "understanding — try things like \"what's the total\", \"which [dimension] had the highest value\", " +
+                "\"what's driving the change\", \"is [goal name] on track\", \"any anomalies\", \"repeat rate\", or " +
+                "mention a specific value by name (e.g. \"North\").";
+        }
+
+        function askQuestion() {
+            const input = document.getElementById('ask-question-input');
+            const question = input.value.trim();
+
+            if (!question) {
+                showErrorToast('Type a question first.');
+                return;
+            }
+
+            const answerContainer = document.getElementById('ask-question-answer-container');
+            const answerText = document.getElementById('ask-question-answer-text');
+
+            answerText.innerText = answerQuestionLocally(question);
+            answerContainer.classList.remove('hidden');
         }
 
         function renderAIInsights(ai) {
@@ -2424,6 +2789,12 @@
             const labels = distribution ? Object.keys(distribution) : [];
             const values = distribution ? Object.values(distribution) : [];
 
+            const clearBtn = document.getElementById('clear-drilldown-btn');
+            if (clearBtn) {
+                const hasDrilldown = currentPrimaryDimension && dimensionFilters[currentPrimaryDimension] && dimensionFilters[currentPrimaryDimension].length > 0;
+                clearBtn.classList.toggle('hidden', !hasDrilldown);
+            }
+
             initChartInstance('segmentChart', {
                 type: 'bar',
                 data: {
@@ -2438,6 +2809,25 @@
                     responsive: true,
                     maintainAspectRatio: false,
                     indexAxis: 'y',
+                    onHover: (evt, elements) => {
+                        evt.native.target.style.cursor = elements.length ? 'pointer' : 'default';
+                    },
+                    onClick: (evt, elements) => {
+                        if (!elements.length || !currentPrimaryDimension) return;
+
+                        const idx = elements[0].index;
+                        const clickedLabel = labels[idx];
+                        if (!clickedLabel) return;
+
+                        dimensionFilters[currentPrimaryDimension] = [clickedLabel];
+                        renderDimensionFilterControls();
+                        updateDimensionFiltersSummaryLabel();
+
+                        const clearBtn = document.getElementById('clear-drilldown-btn');
+                        if (clearBtn) clearBtn.classList.remove('hidden');
+
+                        triggerUpdate();
+                    },
                     plugins: {
                         legend: { display: false }
                     },
