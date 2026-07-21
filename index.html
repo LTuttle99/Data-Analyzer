@@ -1,0 +1,2548 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Intelligent Data Analyzer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+    <style>
+        @keyframes fade-in {
+            from { opacity: 0; transform: translateY(-6px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-fade-in { animation: fade-in 0.25s ease-out; }
+
+        @media print {
+            #upload-card, #mapping-card, .no-print, button { display: none !important; }
+            body { background: white !important; color: black !important; }
+            #workspace-dashboard, #workspace-dashboard * { background: white !important; color: black !important; border-color: #ccc !important; }
+        }
+    </style>
+</head>
+
+<body class="bg-slate-900 text-slate-100 min-h-screen font-sans">
+    <div id="toast-container" class="fixed top-4 right-4 z-[100] flex flex-col gap-2 no-print"></div>
+
+    <div id="loading-overlay" class="hidden fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center no-print">
+        <div class="flex flex-col items-center gap-3">
+            <div class="h-10 w-10 border-4 border-teal-500 border-t-transparent rounded-full animate-spin"></div>
+            <p class="text-sm text-slate-300">Running analysis...</p>
+        </div>
+    </div>
+
+    <header class="border-b border-slate-800 bg-slate-950 px-8 py-4 flex items-center justify-between">
+        <div class="flex items-center space-x-3">
+            <div class="h-8 w-8 rounded bg-teal-500 flex items-center justify-center font-bold text-slate-950">D</div>
+            <h1 class="text-xl font-semibold tracking-wide text-white">
+                DataAnalyzer<span class="text-teal-400 font-normal">.io</span>
+            </h1>
+        </div>
+
+        <div class="text-xs text-slate-400 bg-slate-900 px-3 py-1 rounded-full border border-slate-800">
+            Advanced Analytics Hub
+        </div>
+    </header>
+
+    <main class="max-w-7xl mx-auto p-6 space-y-6">
+
+        <section id="upload-card" class="bg-slate-950 border border-slate-800 rounded-xl p-8 max-w-xl mx-auto shadow-2xl">
+            <h2 class="text-lg font-medium text-white mb-2">Initialize Data Analysis</h2>
+            <p class="text-sm text-slate-400 mb-6">
+                Upload any CSV or Excel file with a date column and a numeric metric. Analysis automatically scopes from January 2020 onward.
+            </p>
+
+            <div id="drop-zone" class="border-2 border-dashed border-slate-700 hover:border-teal-500 rounded-lg p-8 text-center cursor-pointer bg-slate-900/50 transition-colors group">
+                <input type="file" id="file-input" class="hidden" accept=".csv,.xlsx,.xls">
+
+                <div id="upload-status" class="space-y-3">
+                    <svg class="mx-auto h-12 w-12 text-slate-500 group-hover:text-teal-400 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+
+                    <p class="text-sm font-medium text-slate-300">
+                        Select a CSV or Excel file from your device
+                    </p>
+                </div>
+            </div>
+        </section>
+
+        <section id="mapping-card" class="hidden bg-slate-950 border border-slate-800 rounded-xl p-8 max-w-xl mx-auto shadow-2xl">
+            <h3 class="text-lg font-medium text-white mb-2">Verify Schema Assertions</h3>
+            <p class="text-sm text-slate-400 mb-6">
+                Confirm parsed structural mappings before running the analytics engine.
+            </p>
+
+            <div class="space-y-4" id="mapping-selectors"></div>
+
+            <div id="data-quality-panel" class="hidden mt-5 bg-amber-500/10 border border-amber-500/30 rounded-lg p-4">
+                <p class="text-xs font-semibold text-amber-300 uppercase tracking-wider mb-2">Data Quality Notes</p>
+                <ul id="data-quality-warnings" class="space-y-1 text-xs text-amber-200/90"></ul>
+            </div>
+
+            <button id="submit-mapping-btn" onclick="submitMapping()" class="w-full mt-6 bg-teal-500 hover:bg-teal-400 text-slate-950 text-sm font-semibold py-3 px-4 rounded-lg shadow transition-colors">
+                Run Pipeline Execution
+            </button>
+        </section>
+
+        <div id="workspace-dashboard" class="hidden space-y-6">
+
+            <div class="bg-slate-950 border border-slate-800 p-4 rounded-xl space-y-4">
+
+                <div class="flex flex-wrap items-end gap-4">
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">
+                            Dimension Filters
+                        </label>
+
+                        <button onclick="toggleDimensionFiltersPanel()" type="button" class="bg-slate-900 border border-slate-700 hover:border-teal-500 rounded-lg text-xs p-2 text-slate-100 transition-colors flex items-center gap-2 min-w-[180px]">
+                            <span id="dimension-filters-summary-label">No filters applied</span>
+                            <span class="text-slate-400">▾</span>
+                        </button>
+                    </div>
+
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">
+                            Primary Dimension
+                        </label>
+                        <p class="text-[10px] text-slate-500 mb-1">Drives the distribution chart &amp; concentration index</p>
+
+                        <select id="primary-dimension-select" onchange="onPrimaryDimensionChange()" class="bg-slate-900 border border-slate-700 rounded-lg text-xs p-2 text-slate-100 focus:border-teal-500 min-w-[160px]">
+                            <option value="">No dimensions configured</option>
+                        </select>
+                    </div>
+
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">
+                            Start Date
+                        </label>
+
+                        <input type="date" id="filter-start-date" onchange="triggerUpdate()" class="bg-slate-900 border border-slate-700 rounded-lg text-xs p-2 text-slate-100 focus:border-teal-500">
+                    </div>
+
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">
+                            End Date
+                        </label>
+
+                        <input type="date" id="filter-end-date" onchange="triggerUpdate()" class="bg-slate-900 border border-slate-700 rounded-lg text-xs p-2 text-slate-100 focus:border-teal-500">
+                    </div>
+
+                    <button onclick="resetDateRange()" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 text-xs font-medium px-3 py-2 rounded-lg transition-colors">
+                        Reset Dates
+                    </button>
+
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">
+                            Goals
+                        </label>
+
+                        <button onclick="toggleGoalsPanel()" type="button" class="bg-slate-900 border border-slate-700 hover:border-teal-500 rounded-lg text-xs p-2 text-slate-100 transition-colors flex items-center gap-2">
+                            <span id="goals-summary-label">No goals set</span>
+                            <span class="text-slate-400">▾</span>
+                        </button>
+                    </div>
+
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">
+                            Views &amp; Export
+                        </label>
+
+                        <div class="flex gap-1">
+                            <button onclick="toggleSavedViewsPanel()" type="button" class="bg-slate-900 border border-slate-700 hover:border-teal-500 text-slate-100 text-xs font-medium px-3 py-2 rounded-lg transition-colors">
+                                Saved Views
+                            </button>
+                            <button onclick="exportCurrentResultsCsv()" type="button" class="bg-slate-900 border border-slate-700 hover:border-teal-500 text-slate-100 text-xs font-medium px-3 py-2 rounded-lg transition-colors">
+                                Export CSV
+                            </button>
+                            <button onclick="exportCurrentResultsExcel()" type="button" class="bg-slate-900 border border-slate-700 hover:border-teal-500 text-slate-100 text-xs font-medium px-3 py-2 rounded-lg transition-colors">
+                                Export Excel
+                            </button>
+                            <button onclick="window.print()" type="button" class="bg-slate-900 border border-slate-700 hover:border-teal-500 text-slate-100 text-xs font-medium px-3 py-2 rounded-lg transition-colors">
+                                Print / PDF
+                            </button>
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">
+                            Compare Snapshot
+                        </label>
+
+                        <div class="flex gap-1 items-center">
+                            <input type="file" id="compare-file-input" accept=".csv,.xlsx,.xls" class="hidden" onchange="handleCompareFile(event.target.files[0])">
+                            <button onclick="document.getElementById('compare-file-input').click()" type="button" class="bg-slate-900 border border-slate-700 hover:border-teal-500 text-slate-100 text-xs font-medium px-3 py-2 rounded-lg transition-colors">
+                                <span id="compare-snapshot-label">Upload Snapshot</span>
+                            </button>
+                            <button id="clear-compare-btn" onclick="clearComparisonSnapshot()" class="hidden bg-slate-900 border border-slate-700 hover:border-red-500 text-slate-400 hover:text-red-300 text-xs font-medium px-2 py-2 rounded-lg transition-colors" title="Clear comparison">
+                                &times;
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="dimension-filters-panel" class="hidden bg-slate-900/60 border border-slate-800 rounded-lg p-4 space-y-3">
+                    <div class="flex items-center justify-between">
+                        <p class="text-xs font-semibold text-slate-300">Dimension Filters</p>
+                        <button onclick="clearAllDimensionFilters()" class="text-xs text-slate-400 hover:text-red-300">Clear All</button>
+                    </div>
+                    <p class="text-[10px] text-slate-500">Hold Ctrl/Cmd to select multiple values within a dimension. Leaving a dimension unselected means "all values".</p>
+                    <div id="dimension-filters-list" class="grid grid-cols-1 md:grid-cols-3 gap-3"></div>
+                </div>
+
+                <div id="goals-panel" class="hidden bg-slate-900/60 border border-slate-800 rounded-lg p-4 space-y-3">
+                    <div class="flex flex-wrap items-end gap-3">
+                        <div>
+                            <label class="block text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Label</label>
+                            <input type="text" id="new-goal-label" placeholder="e.g. East Region Q3" class="bg-slate-950 border border-slate-700 rounded-lg text-xs p-2 text-slate-100 focus:border-teal-500 w-40">
+                        </div>
+
+                        <div>
+                            <label class="block text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Scope</label>
+                            <select id="new-goal-scope-type" onchange="onGoalScopeTypeChange()" class="bg-slate-950 border border-slate-700 rounded-lg text-xs p-2 text-slate-100 focus:border-teal-500">
+                                <option value="overall">Overall</option>
+                            </select>
+                        </div>
+
+                        <div id="new-goal-scope-value-container" class="hidden">
+                            <label class="block text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Scope Value</label>
+                            <select id="new-goal-scope-value" class="bg-slate-950 border border-slate-700 rounded-lg text-xs p-2 text-slate-100 focus:border-teal-500 min-w-[140px]"></select>
+                        </div>
+
+                        <div>
+                            <label class="block text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Period</label>
+                            <select id="new-goal-period" class="bg-slate-950 border border-slate-700 rounded-lg text-xs p-2 text-slate-100 focus:border-teal-500">
+                                <option value="annual">Annual</option>
+                                <option value="quarterly">Quarterly</option>
+                                <option value="monthly">Monthly</option>
+                            </select>
+                        </div>
+
+                        <div>
+                            <label class="block text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1" id="new-goal-target-label">Target ($)</label>
+                            <input type="number" id="new-goal-target" min="0" step="1000" placeholder="e.g. 500000" class="bg-slate-950 border border-slate-700 rounded-lg text-xs p-2 text-slate-100 focus:border-teal-500 w-36">
+                        </div>
+
+                        <button onclick="addGoal()" class="bg-teal-500 hover:bg-teal-400 text-slate-950 text-xs font-semibold px-4 py-2 rounded-lg transition-colors">
+                            Add Goal
+                        </button>
+                    </div>
+
+                    <div id="goals-list" class="flex flex-wrap gap-2"></div>
+
+                    <div class="border-t border-slate-800 pt-3">
+                        <div class="flex flex-wrap items-end gap-3">
+                            <div>
+                                <p class="text-xs font-semibold text-slate-300">Suggest Goals</p>
+                                <p class="text-[10px] text-slate-500 max-w-sm">
+                                    Proposes targets from last year's same period plus the data's own trailing growth rate, for the overall dataset and top values in each dimension.
+                                </p>
+                            </div>
+
+                            <div>
+                                <label class="block text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">Period</label>
+                                <select id="suggest-goals-period" class="bg-slate-950 border border-slate-700 rounded-lg text-xs p-2 text-slate-100 focus:border-teal-500">
+                                    <option value="annual">Annual</option>
+                                    <option value="quarterly">Quarterly</option>
+                                    <option value="monthly">Monthly</option>
+                                </select>
+                            </div>
+
+                            <button onclick="suggestGoals()" class="bg-purple-500/20 hover:bg-purple-500/30 border border-purple-500/40 text-purple-300 text-xs font-semibold px-4 py-2 rounded-lg transition-colors">
+                                Suggest Goals
+                            </button>
+                        </div>
+
+                        <div id="goal-suggestions-list" class="grid grid-cols-1 md:grid-cols-2 gap-2 mt-3"></div>
+                    </div>
+                </div>
+
+                <div id="saved-views-panel" class="hidden bg-slate-900/60 border border-slate-800 rounded-lg p-4 space-y-3">
+                    <div class="flex flex-wrap items-end gap-3">
+                        <div>
+                            <label class="block text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">View Name</label>
+                            <input type="text" id="saved-view-name" placeholder="e.g. Q3 Leadership Review" class="bg-slate-950 border border-slate-700 rounded-lg text-xs p-2 text-slate-100 focus:border-teal-500 w-56">
+                        </div>
+
+                        <button onclick="saveCurrentView()" class="bg-teal-500 hover:bg-teal-400 text-slate-950 text-xs font-semibold px-4 py-2 rounded-lg transition-colors">
+                            Save Current View
+                        </button>
+                    </div>
+
+                    <div id="saved-views-list" class="flex flex-wrap gap-2 text-xs text-slate-400">
+                        No saved views yet on this device.
+                    </div>
+                </div>
+
+                <div class="border-t border-slate-800"></div>
+
+                <div class="flex flex-wrap items-end gap-4 justify-between">
+                    <div class="flex flex-wrap items-end gap-4">
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">
+                                Effective Date Scope
+                            </label>
+
+                            <label class="inline-flex items-center cursor-pointer bg-slate-900 border border-slate-700 rounded-lg px-3 py-2">
+                                <input type="checkbox" id="toggle-future-dates" onchange="triggerUpdate()" class="sr-only peer">
+
+                                <div class="relative w-9 h-5 bg-slate-700 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-teal-500"></div>
+
+                                <span class="ml-2 text-xs text-slate-300" id="future-toggle-label">
+                                    Include future effective dates
+                                </span>
+                            </label>
+                        </div>
+
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">
+                                Entity View
+                            </label>
+
+                            <div class="inline-flex rounded-lg border border-slate-700 p-0.5 bg-slate-900">
+                                <button id="view-all" onclick="setEntityView('all')" class="px-3 py-1.5 text-xs font-medium rounded-md bg-teal-500 text-slate-950 transition-colors">All</button>
+                                <button id="view-new" onclick="setEntityView('new')" class="px-3 py-1.5 text-xs font-medium rounded-md text-slate-400 hover:text-slate-200 transition-colors">New Only</button>
+                                <button id="view-repeat" onclick="setEntityView('repeat')" class="px-3 py-1.5 text-xs font-medium rounded-md text-slate-400 hover:text-slate-200 transition-colors">Repeat Only</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">
+                            Analytical Forecast Vector
+                        </label>
+
+                        <div class="inline-flex rounded-lg border border-slate-700 p-0.5 bg-slate-900">
+                            <button id="toggle-metric-value" onclick="setMetricTarget('value')" class="px-3 py-1.5 text-xs font-medium rounded-md bg-teal-500 text-slate-950 transition-colors">
+                                Metric Total
+                            </button>
+
+                            <button id="toggle-metric-count" onclick="setMetricTarget('count')" class="px-3 py-1.5 text-xs font-medium rounded-md text-slate-400 hover:text-slate-200 transition-colors">
+                                Entity Count (#)
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="active-range-indicator" class="text-xs text-slate-500 text-center"></div>
+
+            <div id="future-date-diagnostic" class="hidden text-xs text-amber-400 text-center bg-amber-500/10 border border-amber-500/20 rounded-lg py-2 px-4 mx-auto max-w-3xl"></div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+                <div class="bg-slate-950 border border-slate-800 p-5 rounded-xl">
+                    <p class="text-xs font-semibold uppercase tracking-wider text-slate-400">Total Metric Value</p>
+                    <p class="text-2xl font-bold text-white mt-1 tracking-tight" id="kpi-premium">$0</p>
+                    <p class="text-[11px] font-semibold mt-1 hidden" id="kpi-premium-delta"></p>
+                </div>
+
+                <div class="bg-slate-950 border border-slate-800 p-5 rounded-xl">
+                    <p class="text-xs font-semibold uppercase tracking-wider text-slate-400">Unique Entity Count</p>
+                    <p class="text-2xl font-bold text-teal-400 mt-1 tracking-tight" id="kpi-accounts">0</p>
+                    <p class="text-[11px] font-semibold mt-1 hidden" id="kpi-accounts-delta"></p>
+                </div>
+
+                <div class="bg-slate-950 border border-slate-800 p-5 rounded-xl">
+                    <p class="text-xs font-semibold uppercase tracking-wider text-slate-400">Avg Entity Value</p>
+                    <p class="text-2xl font-bold text-white mt-1 tracking-tight" id="kpi-avg-size">$0</p>
+                    <p class="text-[11px] font-semibold mt-1 hidden" id="kpi-avg-size-delta"></p>
+                </div>
+
+                <div class="bg-slate-950 border border-slate-800 p-5 rounded-xl">
+                    <p class="text-xs font-semibold uppercase tracking-wider text-slate-400">Repeat Rate</p>
+                    <p class="text-2xl font-bold text-emerald-400 mt-1 tracking-tight" id="kpi-retention">0.0%</p>
+                    <p class="text-[11px] font-semibold mt-1 hidden" id="kpi-retention-delta"></p>
+                </div>
+
+                <div class="bg-slate-950 border border-slate-800 p-5 rounded-xl">
+                    <p class="text-xs font-semibold uppercase tracking-wider text-slate-400">Concentration HHI Index</p>
+                    <p class="text-2xl font-bold text-amber-400 mt-1 tracking-tight" id="kpi-hhi">0</p>
+                    <p class="text-[11px] font-semibold mt-1 hidden" id="kpi-hhi-delta"></p>
+                </div>
+            </div>
+
+            <section id="forecast-outlook-card" class="bg-slate-950 border border-purple-500/30 rounded-xl p-6">
+                <div class="flex items-center justify-between mb-4">
+                    <div>
+                        <h4 class="text-sm font-medium tracking-wide text-purple-300">Executive Forecast Outlook</h4>
+                        <p class="text-xs text-slate-500 mt-1">
+                            Based on current performance, this estimates where the selected data will finish.
+                        </p>
+                    </div>
+
+                    <span id="forecast-confidence-badge" class="text-xs font-semibold px-3 py-1 rounded-full bg-slate-800 text-slate-400">
+                        Confidence: —
+                    </span>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-5">
+                    <div class="bg-slate-900/60 border border-slate-800 rounded-lg p-4">
+                        <p class="text-xs font-semibold uppercase tracking-wider text-slate-400">Current Actual</p>
+                        <p id="forecast-current-actual" class="text-xl font-bold text-white mt-1">$0</p>
+                    </div>
+
+                    <div class="bg-purple-500/10 border border-purple-500/20 rounded-lg p-4">
+                        <p class="text-xs font-semibold uppercase tracking-wider text-purple-300">Projected Year-End</p>
+                        <p id="forecast-year-end" class="text-xl font-bold text-purple-300 mt-1">$0</p>
+                    </div>
+
+                    <div class="bg-slate-900/60 border border-slate-800 rounded-lg p-4">
+                        <p class="text-xs font-semibold uppercase tracking-wider text-slate-400">Forecast Range</p>
+                        <p id="forecast-range" class="text-xl font-bold text-white mt-1">$0 - $0</p>
+                    </div>
+
+                    <div class="bg-slate-900/60 border border-slate-800 rounded-lg p-4">
+                        <p class="text-xs font-semibold uppercase tracking-wider text-slate-400">Growth vs Prior Year</p>
+                        <p id="forecast-growth" class="text-xl font-bold text-emerald-400 mt-1">0.0%</p>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-5">
+                    <div class="bg-slate-900/60 border border-slate-800 rounded-lg p-4">
+                        <p class="text-xs font-semibold uppercase tracking-wider text-slate-400">Trend Direction</p>
+                        <p id="forecast-trend-direction" class="text-lg font-bold text-white mt-1">Flat</p>
+                    </div>
+
+                    <div class="bg-slate-900/60 border border-slate-800 rounded-lg p-4">
+                        <p class="text-xs font-semibold uppercase tracking-wider text-slate-400">Strongest Seasonal Month</p>
+                        <p id="forecast-seasonal-peak" class="text-lg font-bold text-white mt-1">—</p>
+                    </div>
+
+                    <div class="bg-slate-900/60 border border-slate-800 rounded-lg p-4">
+                        <p class="text-xs font-semibold uppercase tracking-wider text-slate-400">Weakest Seasonal Month</p>
+                        <p id="forecast-seasonal-trough" class="text-lg font-bold text-white mt-1">—</p>
+                    </div>
+                </div>
+
+                <div class="bg-slate-900/70 border border-slate-800 rounded-lg p-4">
+                    <p class="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">Executive Summary</p>
+                    <p id="forecast-executive-summary" class="text-sm text-slate-300 leading-relaxed">
+                        Upload and analyze data to generate a forecast summary.
+                    </p>
+                </div>
+            </section>
+
+            <section id="ai-insight-card" class="bg-slate-950 border border-cyan-500/30 rounded-xl p-6">
+                <div class="flex items-center justify-between mb-4">
+                    <div>
+                        <h4 class="text-sm font-medium tracking-wide text-cyan-300">AI Portfolio Insight Engine</h4>
+                        <p class="text-xs text-slate-500 mt-1">
+                            Automated business observations generated from forecast, retention, concentration, goal, and segment metrics.
+                        </p>
+                    </div>
+
+                    <span id="ai-health-badge" class="text-xs font-semibold px-3 py-1 rounded-full bg-slate-800 text-slate-400">
+                        Health: —
+                    </span>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-5">
+                    <div class="bg-cyan-500/10 border border-cyan-500/20 rounded-lg p-4">
+                        <p class="text-xs font-semibold uppercase tracking-wider text-cyan-300">Portfolio Health Score</p>
+                        <p id="ai-health-score" class="text-3xl font-bold text-white mt-1">0</p>
+                        <p id="ai-health-label" class="text-xs text-slate-400 mt-1">Insufficient Data</p>
+                    </div>
+
+                    <div class="md:col-span-3 bg-slate-900/70 border border-slate-800 rounded-lg p-4">
+                        <p class="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">AI Executive Readout</p>
+                        <p id="ai-executive-summary" class="text-sm text-slate-300 leading-relaxed">
+                            Upload and analyze data to generate AI insights.
+                        </p>
+                    </div>
+                </div>
+
+                <div id="ai-insight-list" class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-5"></div>
+
+                <div class="bg-slate-900/70 border border-slate-800 rounded-lg p-4">
+                    <p class="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3">Recommended Review Actions</p>
+                    <ul id="ai-action-list" class="space-y-2 text-sm text-slate-300"></ul>
+                </div>
+            </section>
+
+            <section id="entity-split-card" class="bg-slate-950 border border-slate-800 rounded-xl p-6 transition-opacity">
+                <div class="flex items-center justify-between mb-4">
+                    <h4 class="text-sm font-medium tracking-wide text-slate-300">New vs Repeat Entity Split</h4>
+                    <span id="classification-method-badge" class="text-xs font-medium px-3 py-1 rounded-full bg-slate-800 text-slate-400">
+                        Classification: —
+                    </span>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6 items-center">
+                    <div class="flex items-center justify-center">
+                        <div class="relative w-48 h-48">
+                            <canvas id="businessSplitChart"></canvas>
+                        </div>
+                    </div>
+
+                    <div class="bg-teal-500/10 border border-teal-500/20 rounded-lg p-4">
+                        <p class="text-xs font-semibold uppercase tracking-wider text-teal-400 mb-2">New</p>
+                        <p id="nb-premium" class="text-2xl font-bold text-white">$0</p>
+                        <p id="nb-count" class="text-xs text-slate-400 mt-1">0 entities</p>
+                        <p id="nb-share" class="text-xs text-teal-300 mt-2 font-medium">0.0% of total</p>
+                    </div>
+
+                    <div class="bg-blue-500/10 border border-blue-500/20 rounded-lg p-4">
+                        <p class="text-xs font-semibold uppercase tracking-wider text-blue-400 mb-2">Repeat</p>
+                        <p id="ren-premium" class="text-2xl font-bold text-white">$0</p>
+                        <p id="ren-count" class="text-xs text-slate-400 mt-1">0 entities</p>
+                        <p id="ren-share" class="text-xs text-blue-300 mt-2 font-medium">0.0% of total</p>
+                    </div>
+                </div>
+            </section>
+
+            <section id="goal-vs-actual-card" class="bg-slate-950 border border-slate-800 rounded-xl p-6">
+                <div class="flex items-center justify-between mb-4">
+                    <div>
+                        <h4 class="text-sm font-medium tracking-wide text-slate-300">Goal vs Actual Pacing</h4>
+                        <p class="text-xs text-slate-500 mt-1">
+                            Each goal below is evaluated within its own scope, period, and window. Projections use seasonality-adjusted forecasting once at least one full remaining month exists in the period.
+                        </p>
+                    </div>
+                </div>
+
+                <div id="goals-cards-container" class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    <div id="no-goals-placeholder" class="text-xs text-slate-500 italic p-4">
+                        No goals configured yet. Use the Goals control above the KPI row to add one or more targets, scoped overall or by any dimension column.
+                    </div>
+                </div>
+            </section>
+
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div class="bg-slate-950 border border-slate-800 p-6 rounded-xl">
+                    <h4 class="text-sm font-medium tracking-wide text-slate-300 mb-4" id="title-trend">
+                        Historical Core Metric Timeline
+                    </h4>
+
+                    <div class="h-72">
+                        <canvas id="trendChart"></canvas>
+                    </div>
+                </div>
+
+                <div class="bg-slate-950 border border-slate-800 p-6 rounded-xl">
+                    <h4 class="text-sm font-medium tracking-wide text-slate-300 mb-4" id="title-segment">
+                        Segment Performance Share
+                    </h4>
+
+                    <div class="h-72">
+                        <canvas id="segmentChart"></canvas>
+                    </div>
+                </div>
+
+                <div class="bg-slate-950 border border-slate-800 p-6 rounded-xl">
+                    <h4 class="text-sm font-medium tracking-wide text-slate-300 mb-4" id="title-projection">
+                        Trend Projection Matrix, Next 12 Months
+                    </h4>
+
+                    <div class="h-72">
+                        <canvas id="projectionChart"></canvas>
+                    </div>
+                </div>
+
+                <div class="bg-slate-950 border border-slate-800 p-6 rounded-xl">
+                    <h4 class="text-sm font-medium tracking-wide text-slate-300 mb-4" id="title-season">
+                        Seasonality Profile Variance
+                    </h4>
+
+                    <div class="h-72">
+                        <canvas id="seasonalityChart"></canvas>
+                    </div>
+                </div>
+
+                <div class="bg-slate-950 border border-slate-800 p-6 rounded-xl lg:col-span-2">
+                    <div class="flex items-center justify-between mb-1">
+                        <h4 class="text-sm font-medium tracking-wide text-slate-300">
+                            Long-Range Forecast
+                        </h4>
+
+                        <div class="flex items-center gap-2">
+                            <label class="text-[10px] text-slate-500 uppercase tracking-wider">Horizon</label>
+                            <select id="forecast-horizon-select" onchange="onForecastHorizonChange()" class="bg-slate-900 border border-slate-700 rounded-lg text-xs px-2 py-1 text-slate-100 focus:border-teal-500">
+                                <option value="12">12 months</option>
+                                <option value="24" selected>24 months</option>
+                                <option value="36">36 months</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <p class="text-xs text-slate-500 mb-4">
+                        Projected forward from the latest data point, not tied to calendar year-end. The shaded range widens the further out the estimate reaches — treat anything beyond ~12 months as directional planning, not a firm number.
+                    </p>
+
+                    <div class="h-72">
+                        <canvas id="longRangeForecastChart"></canvas>
+                    </div>
+
+                    <div id="annual-rollup-cards" class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-4"></div>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <section class="bg-slate-950 border border-slate-800 rounded-xl p-6">
+                    <h4 class="text-sm font-medium tracking-wide text-red-400 mb-4">
+                        Key Risk Exposures and Concentration Outliers
+                    </h4>
+
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left text-sm">
+                            <thead>
+                                <tr class="border-b border-slate-800 text-slate-400 text-xs font-semibold uppercase">
+                                    <th class="pb-3 pl-4">Account Reference Identifier</th>
+                                    <th class="pb-3">Aggregate Financial Concentration Size</th>
+                                    <th class="pb-3 pr-4">Risk Variance Reason</th>
+                                </tr>
+                            </thead>
+
+                            <tbody id="anomaly-table-rows" class="divide-y divide-slate-900 text-slate-300"></tbody>
+                        </table>
+                    </div>
+                </section>
+
+                <section class="bg-slate-950 border border-slate-800 rounded-xl p-6">
+                    <h4 class="text-sm font-medium tracking-wide text-amber-400 mb-1">
+                        Month-over-Month Spikes &amp; Drops
+                    </h4>
+                    <p class="text-xs text-slate-500 mb-4">
+                        Profit centers and agencies whose latest month deviates sharply from their own trailing 3-month average.
+                    </p>
+
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left text-sm">
+                            <thead>
+                                <tr class="border-b border-slate-800 text-slate-400 text-xs font-semibold uppercase">
+                                    <th class="pb-3 pl-4">Entity</th>
+                                    <th class="pb-3">Latest Month</th>
+                                    <th class="pb-3 pr-4">Deviation</th>
+                                </tr>
+                            </thead>
+
+                            <tbody id="trend-anomaly-table-rows" class="divide-y divide-slate-900 text-slate-300"></tbody>
+                        </table>
+                    </div>
+                </section>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        const dropZone = document.getElementById('drop-zone');
+        const fileInput = document.getElementById('file-input');
+        const uploadStatus = document.getElementById('upload-status');
+
+        let allColumns = [];
+        let numericColumns = [];
+        let dateColumns = [];
+        let categoricalColumns = [];
+        let activeCharts = {};
+        let activeGoalCharts = {};
+        let activeMapping = { metric_column: null, timeline_column: null, entity_column: null, dimension_columns: [] };
+        let currentMetricTarget = "value";
+        let currentEntityView = "all";
+        let dateBounds = { min_date: null, max_date: null };
+        let currentGoals = [];
+        let currentForecastHorizon = 24;
+        let dimensionFilters = {};
+        let currentPrimaryDimension = null;
+        let lastResults = null;
+        let lastComparisonResults = null;
+
+        dropZone.addEventListener('click', () => fileInput.click());
+        fileInput.addEventListener('change', (e) => handleFile(e.target.files[0]));
+
+        function extractErrorMessage(data, fallback) {
+            if (!data) return fallback;
+            if (typeof data.error === 'string' && data.error) return data.error;
+            if (typeof data.detail === 'string' && data.detail) return data.detail;
+            return fallback;
+        }
+
+        async function handleFile(file) {
+            if (!file) return;
+
+            uploadStatus.innerHTML = `
+                <div class="animate-spin inline-block w-8 h-8 border-4 border-current border-t-transparent text-teal-400 rounded-full mb-2"></div>
+                <p class="text-sm text-slate-300">Analyzing file structure. Please wait.</p>
+            `;
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                const response = await fetch('/api/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+
+                if (!response.ok || data.error) {
+                    throw new Error(extractErrorMessage(data, `Upload failed (HTTP ${response.status}).`));
+                }
+
+                allColumns = data.columns || [];
+                numericColumns = data.numeric_columns || [];
+                dateColumns = data.date_columns || [];
+                categoricalColumns = data.categorical_columns || [];
+
+                if (data.date_range) {
+                    dateBounds = data.date_range;
+                    applyDateBounds(dateBounds);
+                }
+
+                renderMappingSelectors(data.inferred_mapping || {});
+                renderDataQualityPanel(data.data_quality || null);
+
+            } catch (err) {
+                showErrorToast("Upload failed: " + err.message);
+                resetUploadZone();
+            }
+        }
+
+        function renderDataQualityPanel(quality) {
+            const panel = document.getElementById('data-quality-panel');
+            const list = document.getElementById('data-quality-warnings');
+
+            const warnings = (quality && quality.warnings) || [];
+
+            if (warnings.length === 0) {
+                panel.classList.add('hidden');
+                list.innerHTML = '';
+                return;
+            }
+
+            panel.classList.remove('hidden');
+            list.innerHTML = warnings.map(w => `<li>&bull; ${escapeHtml(w)}</li>`).join('');
+        }
+
+        function resetUploadZone() {
+            uploadStatus.innerHTML = `
+                <svg class="mx-auto h-12 w-12 text-slate-500 group-hover:text-teal-400 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+                <p class="text-sm font-medium text-slate-300">Select a CSV or Excel file from your device</p>
+            `;
+        }
+
+        function renderDimensionFilterControls() {
+            const container = document.getElementById('dimension-filters-list');
+            const dims = activeMapping.dimension_columns || [];
+
+            if (dims.length === 0) {
+                container.innerHTML = '<p class="text-xs text-slate-500 italic">No dimension columns configured. Add some in the schema mapping step.</p>';
+                updateDimensionFiltersSummaryLabel();
+                return;
+            }
+
+            container.innerHTML = dims.map((col, idx) => `
+                <div>
+                    <label class="block text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1">${escapeHtml(col)}</label>
+                    <select multiple data-column="${escapeHtml(col)}" onchange="onDimensionFilterChange(${idx})" class="bg-slate-950 border border-slate-700 rounded-lg text-xs p-2 text-slate-100 w-full h-24" id="dim-filter-select-${idx}">
+                        <option>Loading...</option>
+                    </select>
+                </div>
+            `).join('');
+
+            dims.forEach((col, idx) => loadDimensionFilterOptions(col, idx));
+            updateDimensionFiltersSummaryLabel();
+        }
+
+        async function loadDimensionFilterOptions(col, idx) {
+            const select = document.getElementById(`dim-filter-select-${idx}`);
+            if (!select) return;
+
+            try {
+                const response = await fetch('/api/column-values', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ column: col })
+                });
+
+                const data = await response.json();
+                const values = data.values || [];
+                const selectedSet = new Set(dimensionFilters[col] || []);
+
+                select.innerHTML = values.map(v => `<option value="${escapeHtml(v)}" ${selectedSet.has(v) ? 'selected' : ''}>${escapeHtml(v)}</option>`).join('');
+            } catch (err) {
+                select.innerHTML = '<option value="">Unable to load values</option>';
+            }
+        }
+
+        function onDimensionFilterChange(idx) {
+            const select = document.getElementById(`dim-filter-select-${idx}`);
+            if (!select) return;
+
+            const col = select.dataset.column;
+            const selectedValues = Array.from(select.selectedOptions).map(o => o.value);
+
+            if (selectedValues.length === 0) {
+                delete dimensionFilters[col];
+            } else {
+                dimensionFilters[col] = selectedValues;
+            }
+
+            updateDimensionFiltersSummaryLabel();
+            triggerUpdate();
+        }
+
+        function clearAllDimensionFilters() {
+            dimensionFilters = {};
+            const dims = activeMapping.dimension_columns || [];
+
+            dims.forEach((col, idx) => {
+                const select = document.getElementById(`dim-filter-select-${idx}`);
+                if (select) Array.from(select.options).forEach(o => { o.selected = false; });
+            });
+
+            updateDimensionFiltersSummaryLabel();
+            triggerUpdate();
+        }
+
+        function updateDimensionFiltersSummaryLabel() {
+            const label = document.getElementById('dimension-filters-summary-label');
+            if (!label) return;
+
+            const count = Object.keys(dimensionFilters).length;
+            label.innerText = count === 0 ? 'No filters applied' : `${count} filter${count > 1 ? 's' : ''} applied`;
+        }
+
+        function toggleDimensionFiltersPanel() {
+            document.getElementById('dimension-filters-panel').classList.toggle('hidden');
+            document.getElementById('goals-panel').classList.add('hidden');
+            document.getElementById('saved-views-panel').classList.add('hidden');
+        }
+
+        function renderPrimaryDimensionSelector() {
+            const select = document.getElementById('primary-dimension-select');
+            if (!select) return;
+
+            const dims = activeMapping.dimension_columns || [];
+
+            if (dims.length === 0) {
+                select.innerHTML = '<option value="">No dimensions configured</option>';
+                return;
+            }
+
+            select.innerHTML = dims.map(col => `
+                <option value="${escapeHtml(col)}" ${col === currentPrimaryDimension ? 'selected' : ''}>${escapeHtml(col)}</option>
+            `).join('');
+        }
+
+        function onPrimaryDimensionChange() {
+            const select = document.getElementById('primary-dimension-select');
+            currentPrimaryDimension = select.value || null;
+            triggerUpdate();
+        }
+
+        function applyDateBounds(bounds) {
+            const startInput = document.getElementById('filter-start-date');
+            const endInput = document.getElementById('filter-end-date');
+
+            if (bounds.min_date) {
+                startInput.min = bounds.min_date;
+                startInput.max = bounds.max_date;
+                startInput.value = bounds.min_date;
+            }
+
+            if (bounds.max_date) {
+                endInput.min = bounds.min_date;
+                endInput.max = bounds.max_date;
+                endInput.value = bounds.max_date;
+            }
+
+            updateActiveRangeIndicator();
+        }
+
+        function resetDateRange() {
+            applyDateBounds(dateBounds);
+            triggerUpdate();
+        }
+
+        function updateActiveRangeIndicator() {
+            const indicator = document.getElementById('active-range-indicator');
+            const start = document.getElementById('filter-start-date').value;
+            const end = document.getElementById('filter-end-date').value;
+
+            indicator.innerText = (start && end) ? `Analysis Window: ${start} through ${end}` : '';
+        }
+
+        function renderMappingSelectors(inferred) {
+            document.getElementById('upload-card').classList.add('hidden');
+
+            const target = document.getElementById('mapping-selectors');
+            target.innerHTML = '';
+
+            const metricOptions = numericColumns.map(col => {
+                const selected = inferred.metric_column === col ? 'selected' : '';
+                return `<option value="${escapeHtml(col)}" ${selected}>${escapeHtml(col)}</option>`;
+            }).join('');
+
+            const timelineOptions = dateColumns.map(col => {
+                const selected = inferred.timeline_column === col ? 'selected' : '';
+                return `<option value="${escapeHtml(col)}" ${selected}>${escapeHtml(col)}</option>`;
+            }).join('');
+
+            const entityNonePrefix = `<option value="" ${!inferred.entity_column ? 'selected' : ''}>-- None --</option>`;
+            const entityOptions = allColumns.map(col => {
+                const selected = inferred.entity_column === col ? 'selected' : '';
+                return `<option value="${escapeHtml(col)}" ${selected}>${escapeHtml(col)}</option>`;
+            }).join('');
+
+            const selectedDimensions = new Set(inferred.dimension_columns || []);
+            const dimensionChecklist = categoricalColumns.map(col => `
+                <label class="flex items-center gap-2 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 cursor-pointer hover:border-teal-500">
+                    <input type="checkbox" class="dimension-checkbox" value="${escapeHtml(col)}" ${selectedDimensions.has(col) ? 'checked' : ''}>
+                    ${escapeHtml(col)}
+                </label>
+            `).join('');
+
+            target.innerHTML = `
+                <div>
+                    <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
+                        Metric Column <span class="text-red-400">*</span>
+                    </label>
+                    <p class="text-[11px] text-slate-500 mb-1.5">The number you want to total, average, and forecast (revenue, sales, amount, etc.)</p>
+                    <select id="map-metric_column" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm text-slate-100 focus:border-teal-500">
+                        ${metricOptions}
+                    </select>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
+                        Timeline Column <span class="text-red-400">*</span>
+                    </label>
+                    <p class="text-[11px] text-slate-500 mb-1.5">The date each row happened on.</p>
+                    <select id="map-timeline_column" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm text-slate-100 focus:border-teal-500">
+                        ${timelineOptions}
+                    </select>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
+                        Entity Column <span class="text-slate-500 font-normal normal-case">(optional)</span>
+                    </label>
+                    <p class="text-[11px] text-slate-500 mb-1.5">A recurring identifier (customer, client, account) — enables repeat-rate, concentration, and per-entity metrics.</p>
+                    <select id="map-entity_column" class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm text-slate-100 focus:border-teal-500">
+                        ${entityNonePrefix}${entityOptions}
+                    </select>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
+                        Dimension Columns <span class="text-slate-500 font-normal normal-case">(optional)</span>
+                    </label>
+                    <p class="text-[11px] text-slate-500 mb-1.5">Any columns you want to filter, group, or scope goals by (region, category, channel, etc.)</p>
+                    <div class="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto pr-1" id="dimension-checklist">
+                        ${dimensionChecklist || '<p class="text-xs text-slate-500 italic col-span-2">No categorical columns detected.</p>'}
+                    </div>
+                </div>
+            `;
+
+            document.getElementById('mapping-card').classList.remove('hidden');
+        }
+
+        async function submitMapping() {
+            currentGoals = [];
+            renderGoalsChips();
+            updateGoalsSummaryLabel();
+
+            const checkedDimensions = Array.from(document.querySelectorAll('.dimension-checkbox:checked')).map(cb => cb.value);
+
+            activeMapping = {
+                metric_column: document.getElementById('map-metric_column').value,
+                timeline_column: document.getElementById('map-timeline_column').value,
+                entity_column: document.getElementById('map-entity_column').value || null,
+                dimension_columns: checkedDimensions
+            };
+
+            dimensionFilters = {};
+            currentPrimaryDimension = checkedDimensions[0] || null;
+
+            try {
+                const drResponse = await fetch('/api/date-range', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        timeline_column: activeMapping.timeline_column
+                    })
+                });
+
+                if (drResponse.ok) {
+                    const drData = await drResponse.json();
+
+                    if (drData && drData.min_date) {
+                        dateBounds = drData;
+                        applyDateBounds(dateBounds);
+                    }
+                }
+            } catch (err) {
+                console.warn("Mapping refresh soft-failed:", err);
+            }
+
+            renderDimensionFilterControls();
+            renderPrimaryDimensionSelector();
+            populateGoalScopeSelect();
+
+            document.getElementById('mapping-card').classList.add('hidden');
+            document.getElementById('workspace-dashboard').classList.remove('hidden');
+
+            triggerUpdate();
+        }
+
+        function setMetricTarget(target) {
+            if (currentMetricTarget === target) return;
+
+            currentMetricTarget = target;
+
+            const btnValue = document.getElementById('toggle-metric-value');
+            const btnCount = document.getElementById('toggle-metric-count');
+            const goalTargetLabel = document.getElementById('new-goal-target-label');
+
+            if (target === 'value') {
+                btnValue.className = "px-3 py-1.5 text-xs font-medium rounded-md bg-teal-500 text-slate-950 transition-colors";
+                btnCount.className = "px-3 py-1.5 text-xs font-medium rounded-md text-slate-400 hover:text-slate-200 transition-colors";
+                if (goalTargetLabel) goalTargetLabel.innerText = "Target (Metric Total)";
+            } else {
+                btnCount.className = "px-3 py-1.5 text-xs font-medium rounded-md bg-teal-500 text-slate-950 transition-colors";
+                btnValue.className = "px-3 py-1.5 text-xs font-medium rounded-md text-slate-400 hover:text-slate-200 transition-colors";
+                if (goalTargetLabel) goalTargetLabel.innerText = "Target (Entity Count)";
+            }
+
+            triggerUpdate();
+        }
+
+        function setEntityView(view) {
+            if (currentEntityView === view) return;
+
+            currentEntityView = view;
+
+            ['all', 'new', 'repeat'].forEach(v => {
+                const btn = document.getElementById(`view-${v}`);
+
+                if (v === view) {
+                    btn.className = "px-3 py-1.5 text-xs font-medium rounded-md bg-teal-500 text-slate-950 transition-colors";
+                } else {
+                    btn.className = "px-3 py-1.5 text-xs font-medium rounded-md text-slate-400 hover:text-slate-200 transition-colors";
+                }
+            });
+
+            triggerUpdate();
+        }
+
+        function toggleGoalsPanel() {
+            document.getElementById('goals-panel').classList.toggle('hidden');
+            document.getElementById('saved-views-panel').classList.add('hidden');
+        }
+
+        function toggleSavedViewsPanel() {
+            document.getElementById('saved-views-panel').classList.toggle('hidden');
+            document.getElementById('goals-panel').classList.add('hidden');
+            renderSavedViewsList();
+        }
+
+        async function onGoalScopeTypeChange() {
+            const scopeType = document.getElementById('new-goal-scope-type').value;
+            const container = document.getElementById('new-goal-scope-value-container');
+            const select = document.getElementById('new-goal-scope-value');
+            const targetLabel = document.getElementById('new-goal-target-label');
+
+            targetLabel.innerText = currentMetricTarget === "value" ? "Target (Metric Total)" : "Target (Entity Count)";
+
+            if (scopeType === "overall") {
+                container.classList.add('hidden');
+                select.innerHTML = '';
+                return;
+            }
+
+            // scopeType is a dimension column name directly here.
+            container.classList.remove('hidden');
+            select.innerHTML = '<option>Loading...</option>';
+
+            try {
+                const response = await fetch('/api/column-values', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ column: scopeType })
+                });
+
+                const data = await response.json();
+                const values = data.values || [];
+
+                select.innerHTML = values.map(v => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join('');
+            } catch (err) {
+                select.innerHTML = '<option value="">Unable to load values</option>';
+            }
+        }
+
+        function populateGoalScopeSelect() {
+            const select = document.getElementById('new-goal-scope-type');
+            if (!select) return;
+
+            const dims = activeMapping.dimension_columns || [];
+            select.innerHTML = '<option value="overall">Overall</option>' +
+                dims.map(col => `<option value="${escapeHtml(col)}">${escapeHtml(col)}</option>`).join('');
+        }
+
+        function addGoal() {
+            const label = document.getElementById('new-goal-label').value.trim() || 'Goal';
+            const scopeType = document.getElementById('new-goal-scope-type').value;
+            const scopeValueSelect = document.getElementById('new-goal-scope-value');
+            const isOverall = scopeType === "overall";
+            const scopeColumn = isOverall ? null : scopeType;
+            const scopeValue = isOverall ? null : (scopeValueSelect.value || null);
+            const period = document.getElementById('new-goal-period').value;
+            const targetRaw = document.getElementById('new-goal-target').value;
+            const targetValue = targetRaw ? parseFloat(targetRaw) : 0;
+
+            if (!targetValue || targetValue <= 0) {
+                showErrorToast('Enter a target value greater than 0.');
+                return;
+            }
+
+            if (!isOverall && !scopeValue) {
+                showErrorToast('Select a scope value for this goal.');
+                return;
+            }
+
+            currentGoals.push({
+                id: 'goal_' + Date.now() + '_' + Math.floor(Math.random() * 1000),
+                label: label,
+                scope_type: isOverall ? 'overall' : 'dimension',
+                scope_column: scopeColumn,
+                scope_value: scopeValue,
+                period: period,
+                target_value: targetValue
+            });
+
+            document.getElementById('new-goal-label').value = '';
+            document.getElementById('new-goal-target').value = '';
+
+            renderGoalsChips();
+            updateGoalsSummaryLabel();
+            triggerUpdate();
+        }
+
+        function removeGoal(id) {
+            currentGoals = currentGoals.filter(g => g.id !== id);
+            renderGoalsChips();
+            updateGoalsSummaryLabel();
+            triggerUpdate();
+        }
+
+        function renderGoalsChips() {
+            const list = document.getElementById('goals-list');
+
+            if (currentGoals.length === 0) {
+                list.innerHTML = '<span class="text-xs text-slate-500 italic">No goals added yet.</span>';
+                return;
+            }
+
+            list.innerHTML = currentGoals.map(g => {
+                const scopeLabel = g.scope_type === "overall" ? "Overall" : `${g.scope_column}: ${g.scope_value}`;
+                const removeAttr = g.locked ? `onclick="confirmRemoveLockedGoal('${g.id}')"` : `onclick="removeGoal('${g.id}')"`;
+
+                return `
+                    <span class="inline-flex items-center gap-2 bg-slate-950 border ${g.locked ? 'border-amber-500/50' : 'border-slate-700'} rounded-full px-3 py-1.5 text-xs text-slate-200">
+                        ${g.locked ? '<span title="Locked">&#128274;</span>' : ''}
+                        <span class="font-semibold">${escapeHtml(g.label)}</span>
+                        <span class="text-slate-500">&middot;</span>
+                        <span class="text-slate-400">${escapeHtml(scopeLabel)}</span>
+                        <span class="text-slate-500">&middot;</span>
+                        <span class="text-slate-400 capitalize">${escapeHtml(g.period)}</span>
+                        <span class="text-slate-500">&middot;</span>
+                        <span class="text-teal-400">${formatValueByMetric(g.target_value, currentMetricTarget)}</span>
+                        <button ${removeAttr} class="text-red-400 hover:text-red-300 font-bold ml-1">&times;</button>
+                    </span>
+                `;
+            }).join('');
+        }
+
+        function updateGoalsSummaryLabel() {
+            const label = document.getElementById('goals-summary-label');
+            label.innerText = currentGoals.length === 0
+                ? 'No goals set'
+                : `${currentGoals.length} goal${currentGoals.length > 1 ? 's' : ''} set`;
+        }
+
+        let lastGoalSuggestions = [];
+
+        async function suggestGoals() {
+            if (!activeMapping || !activeMapping.metric_column || !activeMapping.timeline_column) {
+                showErrorToast("Load and map a file before requesting goal suggestions.");
+                return;
+            }
+
+            const period = document.getElementById('suggest-goals-period').value;
+            const container = document.getElementById('goal-suggestions-list');
+            container.innerHTML = '<span class="text-xs text-slate-500 italic col-span-2">Analyzing history...</span>';
+
+            try {
+                const response = await fetch('/api/suggest-goals', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        mapping: activeMapping,
+                        projection_target: currentMetricTarget,
+                        period: period,
+                        top_n: 3
+                    })
+                });
+
+                const data = await response.json();
+
+                if (!response.ok || data.error) {
+                    throw new Error(extractErrorMessage(data, `Suggestion request failed (HTTP ${response.status}).`));
+                }
+
+                renderGoalSuggestions(data.suggestions || []);
+
+            } catch (err) {
+                container.innerHTML = '';
+                showErrorToast("Could not generate goal suggestions: " + err.message);
+            }
+        }
+
+        function renderGoalSuggestions(suggestions) {
+            lastGoalSuggestions = suggestions;
+            const container = document.getElementById('goal-suggestions-list');
+
+            if (suggestions.length === 0) {
+                container.innerHTML = '<span class="text-xs text-slate-500 italic col-span-2">Not enough history yet to suggest goals for this period.</span>';
+                return;
+            }
+
+            container.innerHTML = suggestions.map((s, idx) => {
+                const metric = s.metric_type || currentMetricTarget;
+                const growthLabel = `${s.growth_rate_pct >= 0 ? '+' : ''}${s.growth_rate_pct.toFixed(1)}%`;
+                const growthNote = s.data_sufficient
+                    ? `${growthLabel} vs. the prior comparable period`
+                    : `${growthLabel} (using the overall trend — limited standalone history)`;
+
+                return `
+                    <div class="bg-slate-950 border border-slate-800 rounded-lg p-3">
+                        <p class="text-xs font-semibold text-white">${escapeHtml(s.scope_label)}</p>
+                        <p class="text-[10px] text-slate-500 mt-0.5">
+                            Last comparable period: ${formatValueByMetric(s.reference_actual, metric)} &middot; ${escapeHtml(growthNote)}
+                        </p>
+
+                        <div class="flex flex-wrap gap-2 mt-2">
+                            <button onclick="addSuggestedGoal(${idx}, 'maintain')" class="text-[11px] bg-slate-800 hover:bg-slate-700 text-slate-200 px-2 py-1 rounded transition-colors">
+                                Maintain ${formatValueByMetric(s.suggestions.maintain, metric)}
+                            </button>
+                            <button onclick="addSuggestedGoal(${idx}, 'grow')" class="text-[11px] bg-teal-600/30 hover:bg-teal-600/50 text-teal-300 px-2 py-1 rounded transition-colors">
+                                Grow ${formatValueByMetric(s.suggestions.grow, metric)}
+                            </button>
+                            <button onclick="addSuggestedGoal(${idx}, 'stretch')" class="text-[11px] bg-purple-600/30 hover:bg-purple-600/50 text-purple-300 px-2 py-1 rounded transition-colors">
+                                Stretch ${formatValueByMetric(s.suggestions.stretch, metric)}
+                            </button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function addSuggestedGoal(idx, tier) {
+            const s = lastGoalSuggestions[idx];
+            if (!s) return;
+
+            const tierLabels = { maintain: 'Maintain', grow: 'Grow', stretch: 'Stretch' };
+            const targetValue = s.suggestions[tier];
+
+            if (!targetValue || targetValue <= 0) return;
+
+            currentGoals.push({
+                id: 'goal_' + Date.now() + '_' + Math.floor(Math.random() * 1000),
+                label: `${s.scope_label} — ${tierLabels[tier]}`,
+                scope_type: s.scope_type,
+                scope_column: s.scope_column,
+                scope_value: s.scope_value,
+                period: s.period,
+                target_value: targetValue
+            });
+
+            renderGoalsChips();
+            updateGoalsSummaryLabel();
+            triggerUpdate();
+        }
+
+        function getSavedViews() {
+            try {
+                return JSON.parse(localStorage.getItem('bob_saved_views') || '{}');
+            } catch (err) {
+                return {};
+            }
+        }
+
+        function setSavedViews(views) {
+            localStorage.setItem('bob_saved_views', JSON.stringify(views));
+        }
+
+        function saveCurrentView() {
+            const nameInput = document.getElementById('saved-view-name');
+            const name = nameInput.value.trim();
+
+            if (!name) {
+                showErrorToast('Enter a name for this view.');
+                return;
+            }
+
+            const views = getSavedViews();
+
+            views[name] = {
+                filters: {
+                    dimension_filters: dimensionFilters,
+                    primary_dimension: currentPrimaryDimension,
+                    start_date: document.getElementById('filter-start-date').value,
+                    end_date: document.getElementById('filter-end-date').value,
+                    include_future_dates: document.getElementById('toggle-future-dates').checked,
+                    entity_view: currentEntityView,
+                    metric_target: currentMetricTarget
+                },
+                goals: currentGoals
+            };
+
+            setSavedViews(views);
+            nameInput.value = '';
+            renderSavedViewsList();
+        }
+
+        function renderSavedViewsList() {
+            const container = document.getElementById('saved-views-list');
+            const views = getSavedViews();
+            const names = Object.keys(views);
+
+            if (names.length === 0) {
+                container.innerHTML = 'No saved views yet on this device.';
+                return;
+            }
+
+            container.innerHTML = names.map(name => `
+                <span class="inline-flex items-center gap-2 bg-slate-950 border border-slate-700 rounded-full px-3 py-1.5">
+                    <button onclick="loadSavedView('${escapeHtml(name)}')" class="text-teal-400 hover:text-teal-300 font-medium">${escapeHtml(name)}</button>
+                    <button onclick="deleteSavedView('${escapeHtml(name)}')" class="text-red-400 hover:text-red-300 font-bold">&times;</button>
+                </span>
+            `).join('');
+        }
+
+        function loadSavedView(name) {
+            const views = getSavedViews();
+            const view = views[name];
+
+            if (!view) return;
+
+            const f = view.filters || {};
+
+            document.getElementById('filter-start-date').value = f.start_date || '';
+            document.getElementById('filter-end-date').value = f.end_date || '';
+            document.getElementById('toggle-future-dates').checked = !!f.include_future_dates;
+
+            setEntityView(f.entity_view || 'all');
+            setMetricTarget(f.metric_target || 'value');
+
+            dimensionFilters = f.dimension_filters || {};
+            currentPrimaryDimension = f.primary_dimension || (activeMapping.dimension_columns || [])[0] || null;
+            renderDimensionFilterControls();
+            renderPrimaryDimensionSelector();
+
+            currentGoals = view.goals || [];
+            renderGoalsChips();
+            updateGoalsSummaryLabel();
+
+            document.getElementById('saved-views-panel').classList.add('hidden');
+            triggerUpdate();
+        }
+
+        function deleteSavedView(name) {
+            const views = getSavedViews();
+            delete views[name];
+            setSavedViews(views);
+            renderSavedViewsList();
+        }
+
+        function exportCurrentResultsCsv() {
+            if (!lastResults) {
+                showErrorToast('Run an analysis first.');
+                return;
+            }
+
+            const rows = [];
+            rows.push(['Metric', 'Value']);
+            rows.push(['Total Metric Value', lastResults.kpis.total_metric_value]);
+            rows.push(['Unique Entity Count', lastResults.kpis.unique_entity_count]);
+            rows.push(['Avg Entity Value', lastResults.kpis.avg_entity_value]);
+            rows.push(['Repeat Rate %', lastResults.kpis.repeat_rate]);
+            rows.push(['HHI Index', lastResults.kpis.hhi_index]);
+            rows.push([]);
+            rows.push(['Goal Label', 'Scope Type', 'Scope Column', 'Scope Value', 'Period', 'Period Start', 'Period End', 'Target', 'Actual', 'Achievement %', 'Expected %', 'Gap', 'Projected Period End', 'Status']);
+
+            (lastResults.goal_progress || []).forEach(g => {
+                rows.push([g.label, g.scope_type, g.scope_column || '', g.scope_value || '', g.period, g.period_start, g.period_end, g.target, g.actual, g.achievement_pct, g.expected_pct, g.gap_to_goal, g.projected_period_end, g.status]);
+            });
+
+            rows.push([]);
+            rows.push(['Month', 'Value', 'Rolling Avg', 'New', 'Repeat']);
+
+            const timeline = lastResults.historical_timeline || {};
+
+            (timeline.labels || []).forEach((label, i) => {
+                rows.push([
+                    label,
+                    (timeline.values || [])[i],
+                    (timeline.rolling_avg || [])[i],
+                    (timeline.new_values || [])[i],
+                    (timeline.repeat_values || [])[i]
+                ]);
+            });
+
+            const csvContent = rows.map(row => row.map(cell => {
+                const val = cell === undefined || cell === null ? '' : String(cell);
+                return /[",\n]/.test(val) ? `"${val.replace(/"/g, '""')}"` : val;
+            }).join(',')).join('\n');
+
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `data_analysis_export_${new Date().toISOString().slice(0, 10)}.csv`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+        function exportCurrentResultsExcel() {
+            if (!lastResults) {
+                showErrorToast('Run an analysis first.');
+                return;
+            }
+
+            if (typeof XLSX === 'undefined') {
+                showErrorToast('Excel export library failed to load. Check your network connection and try again.');
+                return;
+            }
+
+            const wb = XLSX.utils.book_new();
+
+            const kpiRows = [
+                ['Metric', 'Value'],
+                ['Total Metric Value', lastResults.kpis.total_metric_value],
+                ['Unique Entity Count', lastResults.kpis.unique_entity_count],
+                ['Avg Entity Value', lastResults.kpis.avg_entity_value],
+                ['Repeat Rate %', lastResults.kpis.repeat_rate],
+                ['HHI Index', lastResults.kpis.hhi_index]
+            ];
+            XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(kpiRows), 'KPIs');
+
+            const goalRows = [
+                ['Goal Label', 'Scope Type', 'Scope Column', 'Scope Value', 'Period', 'Period Start', 'Period End', 'Target', 'Actual', 'Achievement %', 'Expected %', 'Gap', 'Projected Period End', 'Projected Low', 'Projected High', 'Status']
+            ];
+
+            (lastResults.goal_progress || []).forEach(g => {
+                goalRows.push([
+                    g.label, g.scope_type, g.scope_column || '', g.scope_value || '', g.period, g.period_start, g.period_end,
+                    g.target, g.actual, g.achievement_pct, g.expected_pct, g.gap_to_goal,
+                    g.projected_period_end, g.projected_period_end_low ?? '', g.projected_period_end_high ?? '', g.status
+                ]);
+            });
+            XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(goalRows), 'Goals');
+
+            const timeline = lastResults.historical_timeline || {};
+            const trendRows = [['Month', 'Value', 'Rolling Avg', 'New', 'Repeat']];
+
+            (timeline.labels || []).forEach((label, i) => {
+                trendRows.push([
+                    label,
+                    (timeline.values || [])[i],
+                    (timeline.rolling_avg || [])[i],
+                    (timeline.new_values || [])[i],
+                    (timeline.repeat_values || [])[i]
+                ]);
+            });
+            XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(trendRows), 'Monthly Trend');
+
+            const dimensionRows = [[lastResults.primary_dimension || 'Dimension', 'Value']];
+            Object.entries(lastResults.dimension_distribution || {}).forEach(([seg, val]) => {
+                dimensionRows.push([seg, val]);
+            });
+            XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(dimensionRows), 'Dimension Breakdown');
+
+            const anomalyRows = [['Entity', 'Value', 'Reason']];
+            (lastResults.anomalies || []).forEach(a => {
+                anomalyRows.push([a.identifier, a.value, a.reason]);
+            });
+            XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(anomalyRows), 'Concentration Risk');
+
+            const trendAnomalyRows = [['Dimension Column', 'Value', 'Latest Period', 'Latest Value', 'Trailing Avg', 'Deviation %', 'Direction']];
+            (lastResults.trend_anomalies || []).forEach(a => {
+                trendAnomalyRows.push([a.dimension_column, a.scope_value, a.latest_period, a.latest_value, a.trailing_avg, a.deviation_pct, a.direction]);
+            });
+            XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(trendAnomalyRows), 'Spikes and Drops');
+
+            XLSX.writeFile(wb, `data_analysis_export_${new Date().toISOString().slice(0, 10)}.xlsx`);
+        }
+
+        async function triggerUpdate() {
+            if (!activeMapping || !activeMapping.metric_column || !activeMapping.timeline_column) {
+                return;
+            }
+
+            const startDate = document.getElementById('filter-start-date').value;
+            const endDate = document.getElementById('filter-end-date').value;
+            const includeFuture = document.getElementById('toggle-future-dates').checked;
+
+            const unitLabel = currentMetricTarget === "value" ? "Metric Total" : "Entity Count (#)";
+
+            updateActiveRangeIndicator();
+
+            document.getElementById('future-toggle-label').innerText = includeFuture
+                ? "Including future-dated records"
+                : "Include future-dated records";
+
+            const viewLabel = currentEntityView === "all"
+                ? ""
+                : `, ${currentEntityView === "new" ? "New Entities Only" : "Repeat Entities Only"}`;
+
+            document.getElementById('title-trend').innerText = `Historical ${unitLabel} Monthly Trend${viewLabel}`;
+            document.getElementById('title-segment').innerText = `${currentPrimaryDimension || 'Dimension'} Allocation Performance (${unitLabel})${viewLabel}`;
+            document.getElementById('title-projection').innerText = `Expected 12-Month ${unitLabel} Model Projections${viewLabel}`;
+            document.getElementById('title-season').innerText = `Average Yearly Seasonality Profile (${unitLabel})${viewLabel}`;
+
+            setLoadingState(true);
+
+            try {
+                const response = await fetch('/api/analyze', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        mapping: activeMapping,
+                        dimension_filters: dimensionFilters,
+                        projection_target: currentMetricTarget,
+                        primary_dimension: currentPrimaryDimension,
+                        start_date: startDate || null,
+                        end_date: endDate || null,
+                        include_future_dates: includeFuture,
+                        goals: currentGoals,
+                        entity_view: currentEntityView,
+                        forecast_horizon_months: currentForecastHorizon
+                    })
+                });
+
+                const analysisResults = await response.json();
+
+                if (!response.ok || analysisResults.error) {
+                    throw new Error(extractErrorMessage(analysisResults, `Analysis request failed (HTTP ${response.status}).`));
+                }
+
+                displayDashboard(analysisResults);
+
+            } catch (err) {
+                showErrorToast("Analysis failed: " + err.message);
+            } finally {
+                setLoadingState(false);
+            }
+        }
+
+        function setLoadingState(isLoading) {
+            const overlay = document.getElementById('loading-overlay');
+            if (overlay) overlay.classList.toggle('hidden', !isLoading);
+        }
+
+        function showErrorToast(message) {
+            const container = document.getElementById('toast-container');
+            if (!container) { alert(message); return; }
+
+            const toast = document.createElement('div');
+            toast.className = "bg-red-500/15 border border-red-500/40 text-red-300 text-sm rounded-lg px-4 py-3 shadow-2xl max-w-md animate-fade-in";
+            toast.innerText = message;
+
+            container.appendChild(toast);
+
+            setTimeout(() => {
+                toast.style.transition = "opacity 0.4s ease";
+                toast.style.opacity = "0";
+                setTimeout(() => toast.remove(), 400);
+            }, 6000);
+        }
+
+        async function handleCompareFile(file) {
+            if (!file) return;
+
+            if (!activeMapping || !activeMapping.metric_column || !activeMapping.timeline_column) {
+                showErrorToast("Load and map your primary file before uploading a comparison snapshot.");
+                return;
+            }
+
+            const label = document.getElementById('compare-snapshot-label');
+            label.innerText = "Uploading...";
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                const uploadResponse = await fetch('/api/compare-upload', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const uploadData = await uploadResponse.json();
+
+                if (!uploadResponse.ok || uploadData.error) {
+                    throw new Error(extractErrorMessage(uploadData, `Comparison upload failed (HTTP ${uploadResponse.status}).`));
+                }
+
+                await runComparisonAnalysis();
+
+                label.innerText = file.name.length > 18 ? file.name.slice(0, 15) + "..." : file.name;
+                document.getElementById('clear-compare-btn').classList.remove('hidden');
+
+            } catch (err) {
+                showErrorToast("Comparison snapshot failed: " + err.message);
+                label.innerText = "Upload Snapshot";
+            }
+        }
+
+        async function runComparisonAnalysis() {
+            const startDate = document.getElementById('filter-start-date').value;
+            const endDate = document.getElementById('filter-end-date').value;
+            const includeFuture = document.getElementById('toggle-future-dates').checked;
+
+            const response = await fetch('/api/analyze', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    mapping: activeMapping,
+                    dimension_filters: dimensionFilters,
+                    projection_target: currentMetricTarget,
+                    primary_dimension: currentPrimaryDimension,
+                    start_date: startDate || null,
+                    end_date: endDate || null,
+                    include_future_dates: includeFuture,
+                    goals: [],
+                    entity_view: currentEntityView,
+                    target: "compare"
+                })
+            });
+
+            const data = await response.json();
+
+            if (!response.ok || data.error) {
+                throw new Error(extractErrorMessage(data, `Comparison analysis failed (HTTP ${response.status}).`));
+            }
+
+            lastComparisonResults = data;
+            renderComparisonDeltas();
+        }
+
+        function clearComparisonSnapshot() {
+            lastComparisonResults = null;
+            document.getElementById('compare-snapshot-label').innerText = "Upload Snapshot";
+            document.getElementById('clear-compare-btn').classList.add('hidden');
+            document.getElementById('compare-file-input').value = '';
+            renderComparisonDeltas();
+        }
+
+        function renderComparisonDeltas() {
+            const metrics = [
+                { key: 'total_metric_value', id: 'kpi-premium-delta', format: 'value' },
+                { key: 'unique_entity_count', id: 'kpi-accounts-delta', format: 'count' },
+                { key: 'avg_entity_value', id: 'kpi-avg-size-delta', format: 'value' },
+                { key: 'repeat_rate', id: 'kpi-retention-delta', format: 'points' },
+                { key: 'hhi_index', id: 'kpi-hhi-delta', format: 'points' }
+            ];
+
+            metrics.forEach(m => {
+                const el = document.getElementById(m.id);
+                if (!el) return;
+
+                if (!lastResults || !lastComparisonResults) {
+                    el.classList.add('hidden');
+                    el.innerText = '';
+                    return;
+                }
+
+                const current = Number((lastResults.kpis || {})[m.key] || 0);
+                const previous = Number((lastComparisonResults.kpis || {})[m.key] || 0);
+
+                let deltaText;
+
+                if (m.format === 'points') {
+                    const delta = current - previous;
+                    deltaText = `${delta >= 0 ? '+' : ''}${delta.toFixed(1)} pts vs snapshot`;
+                    el.className = "text-[11px] font-semibold mt-1 " + (delta >= 0 ? "text-emerald-400" : "text-red-400");
+                } else {
+                    const pctDelta = previous !== 0 ? ((current - previous) / previous) * 100 : (current > 0 ? 100 : 0);
+                    deltaText = `${pctDelta >= 0 ? '+' : ''}${pctDelta.toFixed(1)}% vs snapshot`;
+                    el.className = "text-[11px] font-semibold mt-1 " + (pctDelta >= 0 ? "text-emerald-400" : "text-red-400");
+                }
+
+                el.innerText = deltaText;
+                el.classList.remove('hidden');
+            });
+        }
+
+        function formatValueByMetric(val, metric) {
+            const safeVal = Number(val || 0);
+
+            if (metric === "value") {
+                return new Intl.NumberFormat('en-US', {
+                    style: 'currency',
+                    currency: 'USD',
+                    maximumFractionDigits: 0
+                }).format(safeVal);
+            }
+
+            return Math.round(safeVal).toLocaleString();
+        }
+
+        function displayDashboard(res) {
+            lastResults = res;
+
+            document.getElementById('kpi-premium').innerText = formatValueByMetric(res.kpis.total_metric_value, "value");
+            document.getElementById('kpi-accounts').innerText = Number(res.kpis.unique_entity_count || 0).toLocaleString();
+            document.getElementById('kpi-avg-size').innerText = formatValueByMetric(res.kpis.avg_entity_value, "value");
+            document.getElementById('kpi-retention').innerText = Number(res.kpis.repeat_rate || 0).toFixed(1) + "%";
+            document.getElementById('kpi-hhi').innerText = Math.round(Number(res.kpis.hhi_index || 0)).toLocaleString();
+
+            const diagnostic = document.getElementById('future-date-diagnostic');
+
+            if (res.diagnostics && !res.diagnostics.include_future_dates && res.diagnostics.future_records_removed > 0) {
+                const amount = formatValueByMetric(res.diagnostics.future_metric_amount, "value");
+                const count = Number(res.diagnostics.future_records_removed || 0).toLocaleString();
+
+                diagnostic.innerText = `Reconciliation Note: ${count} future-dated records totaling ${amount} excluded from this view. Toggle "Include future-dated records" to include them.`;
+                diagnostic.classList.remove('hidden');
+            } else {
+                diagnostic.classList.add('hidden');
+                diagnostic.innerText = '';
+            }
+
+            renderEntitySplit(res.entity_split);
+            renderGoalsCards(res.goal_progress);
+            renderForecastOutlook(res.forecast_outlook);
+            renderAIInsights(res.ai_insights);
+            renderAnomalies(res.anomalies);
+            renderTrendAnomalies(res.trend_anomalies);
+            renderTrendChart(res.historical_timeline);
+            renderDimensionChart(res.dimension_distribution, res.primary_dimension);
+            renderProjectionChart(res.projections);
+            renderSeasonalityChart(res.seasonality);
+            renderLongRangeForecast(res.long_range_forecast);
+            renderComparisonDeltas();
+        }
+
+        function renderTrendAnomalies(trendAnomalies) {
+            const tableBody = document.getElementById('trend-anomaly-table-rows');
+            const list = trendAnomalies || [];
+
+            if (list.length === 0) {
+                tableBody.innerHTML = `
+                    <tr>
+                        <td colspan="3" class="py-4 text-center text-slate-500 text-xs">
+                            No significant month-over-month spikes or drops detected.
+                        </td>
+                    </tr>
+                `;
+                return;
+            }
+
+            tableBody.innerHTML = list.map(a => {
+                const isSpike = a.direction === "spike";
+                const arrow = isSpike ? "▲" : "▼";
+                const colorClass = isSpike ? "text-emerald-400" : "text-red-400";
+
+                return `
+                    <tr class="hover:bg-slate-900/40 text-xs">
+                        <td class="py-3 pl-4 text-slate-200">${escapeHtml(a.dimension_column)}: ${escapeHtml(a.scope_value)}</td>
+                        <td class="py-3 text-slate-400">${escapeHtml(a.latest_period)} &middot; ${formatValueByMetric(a.latest_value, currentMetricTarget)}</td>
+                        <td class="py-3 pr-4 font-semibold ${colorClass}">${arrow} ${Math.abs(a.deviation_pct).toFixed(0)}% vs trailing avg</td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        function onForecastHorizonChange() {
+            const select = document.getElementById('forecast-horizon-select');
+            currentForecastHorizon = parseInt(select.value, 10) || 24;
+            triggerUpdate();
+        }
+
+        function renderLongRangeForecast(lrf) {
+            const canvas = document.getElementById('longRangeForecastChart');
+            if (!canvas) return;
+
+            const monthly = (lrf && lrf.monthly) || [];
+
+            if (monthly.length === 0) {
+                initChartInstance('longRangeForecastChart', {
+                    type: 'line',
+                    data: { labels: [], datasets: [] },
+                    options: { responsive: true, maintainAspectRatio: false }
+                });
+                document.getElementById('annual-rollup-cards').innerHTML = `
+                    <p class="text-xs text-slate-500 italic col-span-4">Not enough monthly history yet to build a multi-year projection.</p>
+                `;
+                return;
+            }
+
+            const labels = monthly.map(m => m.period);
+
+            initChartInstance('longRangeForecastChart', {
+                type: 'line',
+                data: {
+                    labels,
+                    datasets: [
+                        {
+                            label: 'Aggressive',
+                            data: monthly.map(m => m.aggressive_value),
+                            borderColor: 'rgba(167, 139, 250, 0.35)',
+                            backgroundColor: 'transparent',
+                            borderDash: [4, 4],
+                            borderWidth: 1,
+                            pointRadius: 0,
+                            tension: 0.3
+                        },
+                        {
+                            label: 'Expected',
+                            data: monthly.map(m => m.expected_value),
+                            borderColor: '#a78bfa',
+                            backgroundColor: 'rgba(167, 139, 250, 0.08)',
+                            borderWidth: 2.5,
+                            pointRadius: 0,
+                            tension: 0.3,
+                            fill: false
+                        },
+                        {
+                            label: 'Conservative',
+                            data: monthly.map(m => m.conservative_value),
+                            borderColor: 'rgba(167, 139, 250, 0.35)',
+                            backgroundColor: 'transparent',
+                            borderDash: [4, 4],
+                            borderWidth: 1,
+                            pointRadius: 0,
+                            tension: 0.3
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { labels: { color: '#cbd5e1', boxWidth: 12, font: { size: 10 } } }
+                    },
+                    scales: {
+                        x: { ticks: { color: '#94a3b8', maxTicksLimit: 12 }, grid: { color: '#1e293b' } },
+                        y: {
+                            ticks: {
+                                color: '#94a3b8',
+                                callback: (v) => formatValueByMetric(v, currentMetricTarget)
+                            },
+                            grid: { color: '#1e293b' }
+                        }
+                    }
+                }
+            });
+
+            const rollup = (lrf && lrf.annual_rollup) || [];
+            const rollupContainer = document.getElementById('annual-rollup-cards');
+
+            if (rollup.length === 0) {
+                rollupContainer.innerHTML = '';
+                return;
+            }
+
+            rollupContainer.innerHTML = rollup.map(y => `
+                <div class="bg-slate-900/60 border border-slate-800 rounded-lg p-3">
+                    <p class="text-xs font-semibold text-slate-300">${y.year}${y.is_partial_year ? ` <span class="text-slate-500 font-normal">(${y.months_included} mo)</span>` : ''}</p>
+                    <p class="text-base font-bold text-purple-300 mt-1">${formatValueByMetric(y.projected_total, currentMetricTarget)}</p>
+                    <p class="text-[10px] text-slate-500 mt-0.5">${formatValueByMetric(y.conservative_total, currentMetricTarget)} – ${formatValueByMetric(y.aggressive_total, currentMetricTarget)}</p>
+                </div>
+            `).join('');
+        }
+
+        function renderForecastOutlook(fo) {
+            if (!fo) return;
+
+            const metric = fo.metric_type || currentMetricTarget;
+
+            const currentActual = Number(fo.current_actual || 0);
+            const projectedYearEnd = Number(fo.projected_year_end || 0);
+            const conservative = Number(fo.conservative_year_end || 0);
+            const aggressive = Number(fo.aggressive_year_end || 0);
+            const growthPct = Number(fo.growth_vs_previous_year_pct || 0);
+
+            document.getElementById('forecast-current-actual').innerText = formatValueByMetric(currentActual, metric);
+            document.getElementById('forecast-year-end').innerText = formatValueByMetric(projectedYearEnd, metric);
+            document.getElementById('forecast-range').innerText = `${formatValueByMetric(conservative, metric)} - ${formatValueByMetric(aggressive, metric)}`;
+
+            const growthEl = document.getElementById('forecast-growth');
+            growthEl.innerText = `${growthPct >= 0 ? '+' : ''}${growthPct.toFixed(1)}%`;
+            growthEl.className = "text-xl font-bold mt-1 " + (growthPct >= 0 ? "text-emerald-400" : "text-red-400");
+
+            const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+            const seasonalIndex = fo.seasonal_index || {};
+            const seasonalEntries = Object.entries(seasonalIndex);
+
+            const peakEl = document.getElementById('forecast-seasonal-peak');
+            const troughEl = document.getElementById('forecast-seasonal-trough');
+
+            if (seasonalEntries.length > 0) {
+                const sorted = seasonalEntries.slice().sort((a, b) => b[1] - a[1]);
+                const peak = sorted[0];
+                const trough = sorted[sorted.length - 1];
+
+                peakEl.innerText = `${monthNames[parseInt(peak[0], 10) - 1]} (${(peak[1] * 100).toFixed(0)}%)`;
+                troughEl.innerText = `${monthNames[parseInt(trough[0], 10) - 1]} (${(trough[1] * 100).toFixed(0)}%)`;
+            } else {
+                peakEl.innerText = "—";
+                troughEl.innerText = "—";
+            }
+
+            const trendEl = document.getElementById('forecast-trend-direction');
+            trendEl.innerText = fo.trend_direction || "Flat";
+
+            if (fo.trend_direction === "Increasing") {
+                trendEl.className = "text-lg font-bold text-emerald-400 mt-1";
+            } else if (fo.trend_direction === "Decreasing") {
+                trendEl.className = "text-lg font-bold text-red-400 mt-1";
+            } else {
+                trendEl.className = "text-lg font-bold text-slate-300 mt-1";
+            }
+
+            const badge = document.getElementById('forecast-confidence-badge');
+            const confidenceLabel = fo.confidence_label || "Insufficient Data";
+            const confidenceScore = Number(fo.confidence_score || 0);
+
+            if (confidenceLabel === "High") {
+                badge.className = "text-xs font-semibold px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-400";
+            } else if (confidenceLabel === "Moderate") {
+                badge.className = "text-xs font-semibold px-3 py-1 rounded-full bg-amber-500/20 text-amber-400";
+            } else {
+                badge.className = "text-xs font-semibold px-3 py-1 rounded-full bg-red-500/20 text-red-400";
+            }
+
+            badge.innerText = `Confidence: ${confidenceLabel} (${confidenceScore.toFixed(1)}%)`;
+
+            document.getElementById('forecast-executive-summary').innerText =
+                fo.executive_summary || "Not enough data is available to produce a reliable year-end projection.";
+        }
+
+        function renderAIInsights(ai) {
+            if (!ai) return;
+
+            const score = Number(ai.portfolio_health_score || 0);
+            const label = ai.portfolio_health_label || "Insufficient Data";
+            const status = ai.portfolio_health_status || "neutral";
+
+            const badge = document.getElementById('ai-health-badge');
+            const scoreEl = document.getElementById('ai-health-score');
+            const labelEl = document.getElementById('ai-health-label');
+            const summaryEl = document.getElementById('ai-executive-summary');
+            const listEl = document.getElementById('ai-insight-list');
+            const actionEl = document.getElementById('ai-action-list');
+
+            scoreEl.innerText = score.toFixed(1);
+            labelEl.innerText = label;
+            summaryEl.innerText = ai.executive_summary || "Not enough data is available to generate AI insights.";
+
+            if (status === "positive") {
+                badge.className = "text-xs font-semibold px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-400";
+                scoreEl.className = "text-3xl font-bold text-emerald-400 mt-1";
+            } else if (status === "warning") {
+                badge.className = "text-xs font-semibold px-3 py-1 rounded-full bg-amber-500/20 text-amber-400";
+                scoreEl.className = "text-3xl font-bold text-amber-400 mt-1";
+            } else if (status === "risk") {
+                badge.className = "text-xs font-semibold px-3 py-1 rounded-full bg-red-500/20 text-red-400";
+                scoreEl.className = "text-3xl font-bold text-red-400 mt-1";
+            } else {
+                badge.className = "text-xs font-semibold px-3 py-1 rounded-full bg-slate-800 text-slate-400";
+                scoreEl.className = "text-3xl font-bold text-white mt-1";
+            }
+
+            badge.innerText = `Health: ${label}`;
+
+            const insights = ai.insights || [];
+
+            if (insights.length === 0) {
+                listEl.innerHTML = `
+                    <div class="md:col-span-2 bg-slate-900/60 border border-slate-800 rounded-lg p-4 text-sm text-slate-400">
+                        No AI insights are available for the current selection.
+                    </div>
+                `;
+            } else {
+                listEl.innerHTML = insights.map(item => {
+                    let borderClass = "border-slate-800";
+                    let titleClass = "text-slate-200";
+
+                    if (item.severity === "positive") {
+                        borderClass = "border-emerald-500/20";
+                        titleClass = "text-emerald-300";
+                    } else if (item.severity === "warning") {
+                        borderClass = "border-amber-500/20";
+                        titleClass = "text-amber-300";
+                    } else if (item.severity === "risk") {
+                        borderClass = "border-red-500/20";
+                        titleClass = "text-red-300";
+                    }
+
+                    return `
+                        <div class="bg-slate-900/60 border ${borderClass} rounded-lg p-4">
+                            <div class="flex items-start gap-3">
+                                <div class="text-xl">${item.icon || "🤖"}</div>
+                                <div>
+                                    <p class="text-xs font-semibold uppercase tracking-wider text-slate-500">${escapeHtml(item.category || "Insight")}</p>
+                                    <p class="text-sm font-bold ${titleClass} mt-1">${escapeHtml(item.title || "AI Insight")}</p>
+                                    <p class="text-sm text-slate-300 mt-2 leading-relaxed">${escapeHtml(item.message || "")}</p>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            }
+
+            const actions = ai.recommended_actions || [];
+
+            if (actions.length === 0) {
+                actionEl.innerHTML = `
+                    <li class="text-slate-500">No recommended actions available for the current selection.</li>
+                `;
+            } else {
+                actionEl.innerHTML = actions.map(action => `
+                    <li class="flex items-start gap-2">
+                        <span class="text-cyan-400 mt-0.5">•</span>
+                        <span>${escapeHtml(action)}</span>
+                    </li>
+                `).join('');
+            }
+        }
+
+        function renderEntitySplit(es) {
+            if (!es) return;
+
+            const metric = currentMetricTarget;
+            const unavailable = es.classification_method !== 'derived';
+
+            const card = document.getElementById('entity-split-card');
+
+            if (unavailable) {
+                card.classList.add('opacity-50');
+            } else {
+                card.classList.remove('opacity-50');
+            }
+
+            const newVal = metric === "value" ? Number(es.new_value || 0) : Number(es.new_count || 0);
+            const repeatVal = metric === "value" ? Number(es.repeat_value || 0) : Number(es.repeat_count || 0);
+            const total = newVal + repeatVal;
+
+            const newShare = total > 0 ? (newVal / total * 100) : 0;
+            const repeatShare = total > 0 ? (repeatVal / total * 100) : 0;
+
+            document.getElementById('nb-premium').innerText = formatValueByMetric(newVal, metric);
+            document.getElementById('ren-premium').innerText = formatValueByMetric(repeatVal, metric);
+
+            document.getElementById('nb-count').innerText = `${Number(es.new_count || 0).toLocaleString()} entities`;
+            document.getElementById('ren-count').innerText = `${Number(es.repeat_count || 0).toLocaleString()} entities`;
+
+            document.getElementById('nb-share').innerText = `${newShare.toFixed(1)}% of total`;
+            document.getElementById('ren-share').innerText = `${repeatShare.toFixed(1)}% of total`;
+
+            const methodBadge = document.getElementById('classification-method-badge');
+
+            const methodMap = {
+                derived: {
+                    text: 'Classification: Derived from first-seen date',
+                    cls: 'bg-purple-500/20 text-purple-400'
+                },
+                unavailable: {
+                    text: 'Classification: Not available (no entity column mapped)',
+                    cls: 'bg-slate-800 text-slate-400'
+                }
+            };
+
+            const method = methodMap[es.classification_method] || methodMap.unavailable;
+
+            methodBadge.className = `text-xs font-medium px-3 py-1 rounded-full ${method.cls}`;
+            methodBadge.innerText = method.text;
+
+            initChartInstance('businessSplitChart', {
+                type: 'doughnut',
+                data: {
+                    labels: ['New', 'Repeat'],
+                    datasets: [{
+                        data: [newVal, repeatVal],
+                        backgroundColor: ['#14b8a6', '#3b82f6'],
+                        borderWidth: 0,
+                        cutout: '65%'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'bottom',
+                            labels: {
+                                color: '#94a3b8',
+                                font: { size: 11 }
+                            }
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: (ctx) => {
+                                    const val = ctx.parsed;
+                                    const pct = total > 0 ? (val / total * 100).toFixed(1) : 0;
+
+                                    return `${ctx.label}: ${formatValueByMetric(val, metric)} (${pct}%)`;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        const GOAL_STATUS_STYLES = {
+            ahead: { ring: '#10b981', bg: 'bg-emerald-500/20 text-emerald-400', label: 'Ahead of Pace' },
+            on_pace: { ring: '#f59e0b', bg: 'bg-amber-500/20 text-amber-400', label: 'On Pace' },
+            behind: { ring: '#ef4444', bg: 'bg-red-500/20 text-red-400', label: 'Behind Pace' },
+            no_goal_set: { ring: '#475569', bg: 'bg-slate-800 text-slate-400', label: 'No Goal Set' },
+            no_time_elapsed: { ring: '#475569', bg: 'bg-slate-800 text-slate-400', label: 'Insufficient Data' }
+        };
+
+        function renderGoalsCards(goalProgressList) {
+            const container = document.getElementById('goals-cards-container');
+            const list = goalProgressList || [];
+
+            Object.keys(activeGoalCharts).forEach(ctxId => {
+                const stillNeeded = list.find(g => `goalGauge_${g.id}` === ctxId || `goalSpark_${g.id}` === ctxId);
+                if (!stillNeeded) {
+                    activeGoalCharts[ctxId].destroy();
+                    delete activeGoalCharts[ctxId];
+                }
+            });
+
+            if (list.length === 0) {
+                container.innerHTML = `
+                    <div id="no-goals-placeholder" class="text-xs text-slate-500 italic p-4 lg:col-span-2">
+                        No goals configured yet. Use the Goals control above the KPI row to add one or more targets, scoped overall or by any dimension column.
+                    </div>
+                `;
+                return;
+            }
+
+            container.innerHTML = list.map(gp => {
+                const metric = gp.metric_type || currentMetricTarget;
+                const cfg = GOAL_STATUS_STYLES[gp.status] || GOAL_STATUS_STYLES.no_goal_set;
+                const achievement = Math.max(0, Number(gp.achievement_pct || 0));
+                const gap = Number(gp.gap_to_goal || 0);
+                const scopeLabel = gp.scope_type === "overall"
+                    ? "Overall"
+                    : `${gp.scope_column}: ${gp.scope_value}`;
+                const canvasId = `goalGauge_${gp.id}`;
+                const sparkId = `goalSpark_${gp.id}`;
+                const locked = isGoalLocked(gp.id);
+                const hasBand = gp.projected_period_end_low !== null && gp.projected_period_end_low !== undefined
+                    && gp.projected_period_end_high !== null && gp.projected_period_end_high !== undefined;
+                const hasTrend = gp.trend && gp.trend.length >= 2;
+
+                let narrative;
+
+                if (gp.status === 'no_goal_set') {
+                    narrative = 'No target set for this goal.';
+                } else if (gp.status === 'ahead') {
+                    narrative = `Outpacing pro-rated target by ${(achievement - Number(gp.expected_pct || 0)).toFixed(1)} points.`;
+                } else if (gp.status === 'on_pace') {
+                    narrative = 'Tracking within acceptable range of expected pace.';
+                } else if (gp.status === 'behind') {
+                    narrative = `Trailing pro-rated pace by ${(Number(gp.expected_pct || 0) - achievement).toFixed(1)} points.`;
+                } else {
+                    narrative = 'Not enough time has elapsed in this period to compute pace.';
+                }
+
+                const removeAttr = locked
+                    ? `onclick="confirmRemoveLockedGoal('${gp.id}')"`
+                    : `onclick="removeGoal('${gp.id}')"`;
+
+                return `
+                    <div class="bg-slate-900/60 border ${locked ? 'border-amber-500/40' : 'border-slate-800'} rounded-lg p-5">
+                        <div class="flex items-center justify-between mb-3">
+                            <div>
+                                <p class="text-sm font-semibold text-white">
+                                    ${locked ? '<span title="Locked" class="mr-1">&#128274;</span>' : ''}${escapeHtml(gp.label)}
+                                </p>
+                                <p class="text-[10px] text-slate-500 uppercase tracking-wider mt-0.5">
+                                    ${escapeHtml(scopeLabel)} &middot; ${escapeHtml(gp.period)} &middot; ${escapeHtml(gp.period_start)} to ${escapeHtml(gp.period_end)}
+                                </p>
+                            </div>
+
+                            <div class="flex items-center gap-2">
+                                <span class="text-xs font-semibold px-3 py-1 rounded-full ${cfg.bg}">${cfg.label}</span>
+                                <button onclick="toggleGoalLock('${gp.id}')" title="${locked ? 'Unlock goal' : 'Lock goal'}" class="text-slate-500 hover:text-amber-400 text-sm">
+                                    ${locked ? '&#128274;' : '&#128275;'}
+                                </button>
+                                <button ${removeAttr} title="Remove goal" class="text-slate-500 hover:text-red-400 text-sm font-bold">&times;</button>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-3 gap-3 items-center">
+                            <div class="flex flex-col items-center">
+                                <div class="relative w-24 h-24">
+                                    <canvas id="${canvasId}"></canvas>
+                                    <div class="absolute inset-0 flex flex-col items-center justify-center">
+                                        <span class="text-lg font-bold text-white">${achievement.toFixed(0)}%</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="col-span-2 space-y-1.5 text-xs">
+                                <div class="flex justify-between"><span class="text-slate-400">Actual</span><span class="font-semibold text-white">${formatValueByMetric(gp.actual, metric)}</span></div>
+                                <div class="flex justify-between"><span class="text-slate-400">Target</span><span class="font-semibold text-slate-300">${gp.target > 0 ? formatValueByMetric(gp.target, metric) : "—"}</span></div>
+                                <div class="flex justify-between"><span class="text-slate-400">Gap</span><span class="font-semibold ${gap >= 0 ? 'text-emerald-400' : 'text-red-400'}">${gp.target > 0 ? (gap >= 0 ? "+" : "-") + formatValueByMetric(Math.abs(gap), metric) : "—"}</span></div>
+                                <div class="flex justify-between"><span class="text-slate-400">Expected Pace</span><span class="font-semibold text-slate-300">${Number(gp.expected_pct || 0).toFixed(1)}%</span></div>
+                                <div class="flex justify-between"><span class="text-slate-400">Projected Period End</span><span class="font-semibold text-purple-400">${formatValueByMetric(gp.projected_period_end, metric)}</span></div>
+                                ${hasBand ? `<div class="flex justify-between"><span class="text-slate-400">Projected Range</span><span class="font-semibold text-slate-400">${formatValueByMetric(gp.projected_period_end_low, metric)} – ${formatValueByMetric(gp.projected_period_end_high, metric)}</span></div>` : ''}
+                            </div>
+                        </div>
+
+                        ${hasTrend ? `<div class="h-12 mt-3"><canvas id="${sparkId}"></canvas></div>` : ''}
+
+                        <p class="text-[11px] text-slate-400 italic mt-3">${escapeHtml(narrative)}</p>
+                    </div>
+                `;
+            }).join('');
+
+            list.forEach(gp => {
+                const displayPct = Math.min(Math.max(0, Number(gp.achievement_pct || 0)), 100);
+                const cfg = GOAL_STATUS_STYLES[gp.status] || GOAL_STATUS_STYLES.no_goal_set;
+
+                initGoalChartInstance(`goalGauge_${gp.id}`, {
+                    type: 'doughnut',
+                    data: {
+                        datasets: [{
+                            data: [displayPct, 100 - displayPct],
+                            backgroundColor: [cfg.ring, '#1e293b'],
+                            borderWidth: 0,
+                            cutout: '75%',
+                            circumference: 360,
+                            rotation: 0
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { display: false },
+                            tooltip: { enabled: false }
+                        }
+                    }
+                });
+
+                if (gp.trend && gp.trend.length >= 2) {
+                    const sparkCanvas = document.getElementById(`goalSpark_${gp.id}`);
+
+                    if (sparkCanvas) {
+                        initGoalChartInstance(`goalSpark_${gp.id}`, {
+                            type: 'line',
+                            data: {
+                                labels: gp.trend.map(t => t.date),
+                                datasets: [{
+                                    data: gp.trend.map(t => t.cumulative_actual),
+                                    borderColor: cfg.ring,
+                                    backgroundColor: 'transparent',
+                                    borderWidth: 1.5,
+                                    pointRadius: 0,
+                                    tension: 0.3
+                                }]
+                            },
+                            options: {
+                                responsive: true,
+                                maintainAspectRatio: false,
+                                plugins: { legend: { display: false }, tooltip: { enabled: false } },
+                                scales: { x: { display: false }, y: { display: false } }
+                            }
+                        });
+                    }
+                }
+            });
+        }
+
+        function isGoalLocked(goalId) {
+            const goal = currentGoals.find(g => g.id === goalId);
+            return !!(goal && goal.locked);
+        }
+
+        function toggleGoalLock(goalId) {
+            const goal = currentGoals.find(g => g.id === goalId);
+            if (!goal) return;
+
+            goal.locked = !goal.locked;
+            renderGoalsChips();
+
+            if (lastResults) {
+                renderGoalsCards(lastResults.goal_progress);
+            }
+        }
+
+        function confirmRemoveLockedGoal(goalId) {
+            if (confirm('This goal is locked. Remove it anyway?')) {
+                removeGoal(goalId);
+            }
+        }
+
+        function initGoalChartInstance(ctxId, configuration) {
+            if (activeGoalCharts[ctxId]) {
+                activeGoalCharts[ctxId].destroy();
+                delete activeGoalCharts[ctxId];
+            }
+
+            const el = document.getElementById(ctxId);
+
+            if (el) {
+                activeGoalCharts[ctxId] = new Chart(el.getContext('2d'), configuration);
+            }
+        }
+
+        function renderAnomalies(anomalies) {
+            const tableBody = document.getElementById('anomaly-table-rows');
+
+            if (anomalies && anomalies.length > 0) {
+                tableBody.innerHTML = anomalies.map(item => `
+                    <tr class="hover:bg-slate-900/40 font-mono text-xs">
+                        <td class="py-3 pl-4 text-slate-200">${escapeHtml(item.identifier)}</td>
+                        <td class="py-3 text-red-400 font-semibold">${formatValueByMetric(item.value, "value")}</td>
+                        <td class="py-3 text-slate-400 pr-4">${escapeHtml(item.reason)}</td>
+                    </tr>
+                `).join('');
+            } else {
+                tableBody.innerHTML = `
+                    <tr>
+                        <td colspan="3" class="py-4 text-center text-slate-500 text-xs">
+                            No significant concentration variances observed within the selected scope.
+                        </td>
+                    </tr>
+                `;
+            }
+        }
+
+        function initChartInstance(ctxId, configuration) {
+            if (activeCharts[ctxId]) {
+                activeCharts[ctxId].destroy();
+                delete activeCharts[ctxId];
+            }
+
+            const el = document.getElementById(ctxId);
+
+            if (el) {
+                const ctx = el.getContext('2d');
+                activeCharts[ctxId] = new Chart(ctx, configuration);
+            }
+        }
+
+        function renderTrendChart(timeline) {
+            const safeTimeline = timeline || {
+                labels: [],
+                values: [],
+                rolling_avg: [],
+                new_values: [],
+                repeat_values: []
+            };
+
+            const labelStr = currentMetricTarget === "value"
+                ? 'Observed Monthly Metric Total'
+                : 'Observed Entity Count';
+
+            const showSplitOverlays = currentEntityView === "all";
+
+            const datasets = [
+                {
+                    label: labelStr,
+                    data: safeTimeline.values || [],
+                    borderColor: '#14b8a6',
+                    backgroundColor: 'rgba(20, 184, 166, 0.1)',
+                    fill: true,
+                    tension: 0.1
+                },
+                {
+                    label: '3-Period Rolling Mean',
+                    data: safeTimeline.rolling_avg || [],
+                    borderColor: '#94a3b8',
+                    borderDash: [5, 5],
+                    fill: false,
+                    tension: 0.1
+                }
+            ];
+
+            if (showSplitOverlays && safeTimeline.new_values && safeTimeline.repeat_values) {
+                datasets.push({
+                    label: 'New',
+                    data: safeTimeline.new_values,
+                    borderColor: '#10b981',
+                    borderDash: [3, 3],
+                    fill: false,
+                    tension: 0.1,
+                    pointRadius: 2
+                });
+
+                datasets.push({
+                    label: 'Repeat',
+                    data: safeTimeline.repeat_values,
+                    borderColor: '#3b82f6',
+                    borderDash: [3, 3],
+                    fill: false,
+                    tension: 0.1,
+                    pointRadius: 2
+                });
+            }
+
+            initChartInstance('trendChart', {
+                type: 'line',
+                data: {
+                    labels: safeTimeline.labels || [],
+                    datasets: datasets
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            labels: { color: '#94a3b8' }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            ticks: { color: '#94a3b8' },
+                            grid: { color: '#1e293b' }
+                        },
+                        y: {
+                            ticks: { color: '#94a3b8' },
+                            grid: { color: '#1e293b' }
+                        }
+                    }
+                }
+            });
+        }
+
+        function renderDimensionChart(distribution, dimensionName) {
+            const labels = distribution ? Object.keys(distribution) : [];
+            const values = distribution ? Object.values(distribution) : [];
+
+            initChartInstance('segmentChart', {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: dimensionName ? `${dimensionName} Breakdown` : 'Dimension Breakdown',
+                        data: values,
+                        backgroundColor: '#3b82f6'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    indexAxis: 'y',
+                    plugins: {
+                        legend: { display: false }
+                    },
+                    scales: {
+                        x: {
+                            ticks: { color: '#94a3b8' },
+                            grid: { color: '#1e293b' }
+                        },
+                        y: {
+                            ticks: { color: '#94a3b8' },
+                            grid: { color: '#1e293b' }
+                        }
+                    }
+                }
+            });
+        }
+
+        function renderProjectionChart(proj) {
+            const safeProj = proj || [];
+
+            initChartInstance('projectionChart', {
+                type: 'line',
+                data: {
+                    labels: safeProj.map(p => p.period),
+                    datasets: [{
+                        label: 'Expected Linear Baseline Model',
+                        data: safeProj.map(p => p.projected_value),
+                        borderColor: '#a855f7',
+                        backgroundColor: 'rgba(168, 85, 247, 0.1)',
+                        fill: true,
+                        tension: 0.2
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            labels: { color: '#94a3b8' }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            ticks: { color: '#94a3b8' },
+                            grid: { color: '#1e293b' }
+                        },
+                        y: {
+                            ticks: { color: '#94a3b8' },
+                            grid: { color: '#1e293b' }
+                        }
+                    }
+                }
+            });
+        }
+
+        function renderSeasonalityChart(season) {
+            const monthsOrder = [
+                "January", "February", "March", "April", "May", "June",
+                "July", "August", "September", "October", "November", "December"
+            ];
+
+            const labels = season ? monthsOrder.filter(m => season[m] !== undefined) : [];
+            const data = season ? labels.map(m => season[m]) : [];
+
+            initChartInstance('seasonalityChart', {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Mean Distribution Core Concentration',
+                        data: data,
+                        borderColor: '#fbbf24',
+                        backgroundColor: 'rgba(251, 191, 36, 0.12)',
+                        fill: true,
+                        tension: 0.3
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false }
+                    },
+                    scales: {
+                        x: {
+                            ticks: { color: '#94a3b8' },
+                            grid: { color: '#1e293b' }
+                        },
+                        y: {
+                            ticks: { color: '#94a3b8' },
+                            grid: { color: '#1e293b' }
+                        }
+                    }
+                }
+            });
+        }
+
+        function escapeHtml(value) {
+            return String(value ?? "")
+                .replaceAll("&", "&amp;")
+                .replaceAll("<", "&lt;")
+                .replaceAll(">", "&gt;")
+                .replaceAll('"', "&quot;")
+                .replaceAll("'", "&#039;");
+        }
+    </script>
+</body>
+</html>
