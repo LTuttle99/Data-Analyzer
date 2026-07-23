@@ -5,7 +5,7 @@ import io
 from datetime import datetime
 
 
-ANALYTICAL_BASELINE = pd.Timestamp("2020-01-01")
+ANALYTICAL_BASELINE = pd.Timestamp("2016-01-01")
 
 METRIC_NAME_HINTS = [
     "revenue", "sales", "amount", "total", "price", "cost", "premium", "value",
